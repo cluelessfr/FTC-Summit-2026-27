@@ -1,28 +1,34 @@
-package org.firstinspires.ftc.teamcode;
+package org.firstinspires.ftc.teamcode.driveTrain;
 
+import com.qualcomm.hardware.rev.RevHubOrientationOnRobot;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
+import com.qualcomm.robotcore.hardware.IMU;
+
+import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 
 /**
- * Robot-centric mecanum TeleOp that commands encoder velocity instead of raw motor power.
- *
+ * Field-centric mecanum TeleOp that commands encoder velocity instead of raw motor power.
+ * <p>
  * Before running:
  * 1. Select the correct motor type for every drive motor in the Robot Configuration.
  * 2. Connect all four motor encoder cables.
  * 3. Match the hardware names below to the Robot Configuration.
  * 4. Enter the actual front chain sprocket tooth counts below.
- * 5. Test motor directions with the wheels raised and at a low MAX_SPEED_FRACTION.
+ * 5. Set the Control Hub logo and USB directions to match its physical mounting.
+ * 6. Test motor directions with the wheels raised and at a low MAX_SPEED_FRACTION.
  */
-@TeleOp(name = "Robot-Centric Mecanum (Velocity)", group = "Drive")
-public class RobotCentricMecanumVelocity extends LinearOpMode {
+@TeleOp(name = "Field-Centric Drive", group = "Drivetrain")
+public class FieldCentricMecanumVelocity extends LinearOpMode {
 
     private static final String FRONT_LEFT_NAME = "front_left_motor";
     private static final String FRONT_RIGHT_NAME = "front_right_motor";
     private static final String BACK_LEFT_NAME = "back_left_motor";
     private static final String BACK_RIGHT_NAME = "back_right_motor";
+    private static final String IMU_NAME = "imu";
 
     /*
      * For a chain drive:
@@ -35,17 +41,25 @@ public class RobotCentricMecanumVelocity extends LinearOpMode {
     // The rear wheels are directly driven, so one motor revolution is one wheel revolution.
     private static final double REAR_WHEEL_REVS_PER_MOTOR_REV = 1.0;
 
+    // Change these two values to match the Control Hub's actual mounting on the robot.
+    private static final RevHubOrientationOnRobot.LogoFacingDirection LOGO_FACING_DIRECTION =
+            RevHubOrientationOnRobot.LogoFacingDirection.UP;
+    private static final RevHubOrientationOnRobot.UsbFacingDirection USB_FACING_DIRECTION =
+            RevHubOrientationOnRobot.UsbFacingDirection.RIGHT;
+
     // Begin conservatively. Increase only after checking target versus measured RPM under load.
-    private static final double MAX_SPEED_FRACTION = 1.00;
+    private static final double MAX_SPEED_FRACTION = 1.0;
     private static final double JOYSTICK_DEADBAND = 0.05;
 
     private DcMotorEx frontLeft;
     private DcMotorEx frontRight;
     private DcMotorEx backLeft;
     private DcMotorEx backRight;
+    private IMU imu;
 
     private double frontWheelRevsPerMotorRev;
     private double maximumWheelRpm;
+    private boolean resetYawWasPressed;
 
     @Override
     public void runOpMode() {
@@ -55,6 +69,7 @@ public class RobotCentricMecanumVelocity extends LinearOpMode {
         frontRight = hardwareMap.get(DcMotorEx.class, FRONT_RIGHT_NAME);
         backLeft = hardwareMap.get(DcMotorEx.class, BACK_LEFT_NAME);
         backRight = hardwareMap.get(DcMotorEx.class, BACK_RIGHT_NAME);
+        imu = hardwareMap.get(IMU.class, IMU_NAME);
 
         /*
          * These directions match the FTC mecanum sample. If a wheel moves backward during the
@@ -70,6 +85,10 @@ public class RobotCentricMecanumVelocity extends LinearOpMode {
         configureForVelocityControl(backLeft);
         configureForVelocityControl(backRight);
 
+        RevHubOrientationOnRobot orientationOnRobot = new RevHubOrientationOnRobot(
+                LOGO_FACING_DIRECTION, USB_FACING_DIRECTION);
+        imu.initialize(new IMU.Parameters(orientationOnRobot));
+
         frontWheelRevsPerMotorRev =
                 FRONT_MOTOR_SPROCKET_TEETH / FRONT_WHEEL_SPROCKET_TEETH;
 
@@ -80,7 +99,10 @@ public class RobotCentricMecanumVelocity extends LinearOpMode {
         telemetry.addData("Maximum wheel RPM", "%.1f", maximumWheelRpm);
         telemetry.addData("Front chain ratio", "%.3f wheel rev / motor rev",
                 frontWheelRevsPerMotorRev);
-        telemetry.addLine("Verify directions with the wheels raised before driving on the floor.");
+        telemetry.addData("Hub orientation", "Logo %s, USB %s",
+                LOGO_FACING_DIRECTION, USB_FACING_DIRECTION);
+        telemetry.addLine("The robot's starting direction becomes field forward.");
+        telemetry.addLine("Press A while stopped to redefine field forward.");
         telemetry.update();
 
         waitForStart();
@@ -89,15 +111,33 @@ public class RobotCentricMecanumVelocity extends LinearOpMode {
             return;
         }
 
+        // Define zero heading from the direction in which the robot starts TeleOp.
+        imu.resetYaw();
+
         while (opModeIsActive()) {
-            double forward = applyDeadband(-gamepad1.left_stick_y);
-            double strafe = applyDeadband(gamepad1.left_stick_x);
+            boolean resetYawPressed = gamepad1.a;
+            if (resetYawPressed && !resetYawWasPressed) {
+                imu.resetYaw();
+            }
+            resetYawWasPressed = resetYawPressed;
+
+            double fieldForward = applyDeadband(-gamepad1.left_stick_y);
+            double fieldStrafe = applyDeadband(gamepad1.left_stick_x);
             double turn = applyDeadband(gamepad1.right_stick_x);
 
-            double frontLeftMix = forward + strafe + turn;
-            double frontRightMix = forward - strafe - turn;
-            double backLeftMix = forward - strafe + turn;
-            double backRightMix = forward + strafe - turn;
+            double headingRadians =
+                    imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.RADIANS);
+
+            // Rotate the field-relative translation command by negative robot heading.
+            double cosine = Math.cos(headingRadians);
+            double sine = Math.sin(headingRadians);
+            double robotForward = fieldForward * cosine - fieldStrafe * sine;
+            double robotStrafe = fieldStrafe * cosine + fieldForward * sine;
+
+            double frontLeftMix = robotForward + robotStrafe + turn;
+            double frontRightMix = robotForward - robotStrafe - turn;
+            double backLeftMix = robotForward - robotStrafe + turn;
+            double backRightMix = robotForward + robotStrafe - turn;
 
             // Scale every wheel together so the requested movement direction is preserved.
             double largestMagnitude = Math.max(1.0,
@@ -119,6 +159,7 @@ public class RobotCentricMecanumVelocity extends LinearOpMode {
             setWheelRpm(backLeft, backLeftWheelRpm, REAR_WHEEL_REVS_PER_MOTOR_REV);
             setWheelRpm(backRight, backRightWheelRpm, REAR_WHEEL_REVS_PER_MOTOR_REV);
 
+            telemetry.addData("Heading", "%7.1f deg", Math.toDegrees(headingRadians));
             telemetry.addData("Target FL / FR wheel RPM", "%7.1f / %7.1f",
                     frontLeftWheelRpm, frontRightWheelRpm);
             telemetry.addData("Actual FL / FR wheel RPM", "%7.1f / %7.1f",
@@ -129,6 +170,7 @@ public class RobotCentricMecanumVelocity extends LinearOpMode {
             telemetry.addData("Actual BL / BR wheel RPM", "%7.1f / %7.1f",
                     getWheelRpm(backLeft, REAR_WHEEL_REVS_PER_MOTOR_REV),
                     getWheelRpm(backRight, REAR_WHEEL_REVS_PER_MOTOR_REV));
+            telemetry.addLine("A: reset field heading");
             telemetry.update();
         }
 
