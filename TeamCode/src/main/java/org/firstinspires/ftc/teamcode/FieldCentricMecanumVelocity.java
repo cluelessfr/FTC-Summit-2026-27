@@ -24,10 +24,10 @@ import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 @TeleOp(name = "Field-Centric Mecanum (Velocity)", group = "Drive")
 public class FieldCentricMecanumVelocity extends LinearOpMode {
 
-    private static final String FRONT_LEFT_NAME = "front_left_drive";
-    private static final String FRONT_RIGHT_NAME = "front_right_drive";
-    private static final String BACK_LEFT_NAME = "back_left_drive";
-    private static final String BACK_RIGHT_NAME = "back_right_drive";
+    private static final String FRONT_LEFT_NAME = "front_left_motor";
+    private static final String FRONT_RIGHT_NAME = "front_right_motor";
+    private static final String BACK_LEFT_NAME = "back_left_motor";
+    private static final String BACK_RIGHT_NAME = "back_right_motor";
     private static final String IMU_NAME = "imu";
 
     /*
@@ -35,8 +35,8 @@ public class FieldCentricMecanumVelocity extends LinearOpMode {
      * wheel revolutions per motor revolution = motor sprocket teeth / wheel sprocket teeth.
      * Leaving both values equal represents a 1:1 chain ratio.
      */
-    private static final double FRONT_MOTOR_SPROCKET_TEETH = 1.0;
-    private static final double FRONT_WHEEL_SPROCKET_TEETH = 1.0;
+    private static final double FRONT_MOTOR_SPROCKET_TEETH = 24.0;
+    private static final double FRONT_WHEEL_SPROCKET_TEETH = 24.0;
 
     // The rear wheels are directly driven, so one motor revolution is one wheel revolution.
     private static final double REAR_WHEEL_REVS_PER_MOTOR_REV = 1.0;
@@ -45,10 +45,10 @@ public class FieldCentricMecanumVelocity extends LinearOpMode {
     private static final RevHubOrientationOnRobot.LogoFacingDirection LOGO_FACING_DIRECTION =
             RevHubOrientationOnRobot.LogoFacingDirection.UP;
     private static final RevHubOrientationOnRobot.UsbFacingDirection USB_FACING_DIRECTION =
-            RevHubOrientationOnRobot.UsbFacingDirection.FORWARD;
+            RevHubOrientationOnRobot.UsbFacingDirection.RIGHT;
 
     // Begin conservatively. Increase only after checking target versus measured RPM under load.
-    private static final double MAX_SPEED_FRACTION = 0.60;
+    private static final double MAX_SPEED_FRACTION = 1.0;
     private static final double JOYSTICK_DEADBAND = 0.05;
 
     private DcMotorEx frontLeft;
