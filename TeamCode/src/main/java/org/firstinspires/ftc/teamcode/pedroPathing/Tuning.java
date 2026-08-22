@@ -1223,6 +1223,10 @@ class Line extends OpMode {
         }
 
         telemetryM.debug("Driving Forward?: " + forward);
+        telemetryM.debug("Current X: " + follower.getPose().getX());
+        telemetryM.debug("Current Y: " + follower.getPose().getY());
+        telemetryM.debug("Target X: " + (forward ? 72 + DISTANCE : 72));
+        telemetryM.debug("Heading: " + Math.toDegrees(follower.getPose().getHeading()));
         telemetryM.update(telemetry);
     }
 }
