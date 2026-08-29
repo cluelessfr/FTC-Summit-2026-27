@@ -4,7 +4,7 @@ import com.bylazar.configurables.annotations.Configurable;
 import com.bylazar.telemetry.PanelsTelemetry;
 import com.bylazar.telemetry.TelemetryManager;
 import com.pedropathing.follower.Follower;
-import com.pedropathing.geometry.BezierLine;
+import com.pedropathing.geometry.BezierCurve;
 import com.pedropathing.geometry.Pose;
 import com.pedropathing.ivy.Command;
 import com.pedropathing.ivy.Scheduler;
@@ -15,15 +15,14 @@ import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import org.firstinspires.ftc.teamcode.pedroPathing.Constants;
 
 import static com.pedropathing.ivy.Scheduler.schedule;
-import static com.pedropathing.ivy.groups.Groups.sequential;
 import static com.pedropathing.ivy.pedro.PedroCommands.follow;
 
-@Autonomous(name = "Pedro Pathing Autonomous")
+@Autonomous(name = "Pedro Curve Autonomous", group = "Autonomous")
 @Configurable
-public class PedroAutonomous extends OpMode {
-    private static final Pose START_POSE = new Pose(72, 72, Math.toRadians(90));
-    private static final Pose PATH_1_END_POSE = new Pose(72, 96, Math.toRadians(135));
-    private static final Pose PATH_2_END_POSE = new Pose(48, 120, Math.toRadians(180));
+public class PedroCurveAutonomous extends OpMode {
+    private static final Pose START_POSE = new Pose(72, 48, Math.toRadians(90));
+    private static final Pose CONTROL_POSE = new Pose(120, 72);
+    private static final Pose END_POSE = new Pose(72, 96, Math.toRadians(270));
 
     private TelemetryManager panelsTelemetry;
     public Follower follower;
@@ -61,31 +60,23 @@ public class PedroAutonomous extends OpMode {
 
     public static class Paths {
         public final PathChain path1;
-        public final PathChain path2;
 
         public Paths(Follower follower) {
             path1 = follower.pathBuilder()
-                    .addPath(new BezierLine(START_POSE, PATH_1_END_POSE))
+                    .addPath(new BezierCurve(
+                            START_POSE,
+                            CONTROL_POSE,
+                            END_POSE
+                    ))
                     .setLinearHeadingInterpolation(
                             START_POSE.getHeading(),
-                            PATH_1_END_POSE.getHeading()
-                    )
-                    .build();
-
-            path2 = follower.pathBuilder()
-                    .addPath(new BezierLine(PATH_1_END_POSE, PATH_2_END_POSE))
-                    .setLinearHeadingInterpolation(
-                            PATH_1_END_POSE.getHeading(),
-                            PATH_2_END_POSE.getHeading()
+                            END_POSE.getHeading()
                     )
                     .build();
         }
     }
 
     private Command autoRoutine() {
-        return sequential(
-                follow(follower, paths.path1, false),
-                follow(follower, paths.path2, true)
-        );
+        return follow(follower, paths.path1, true);
     }
 }

@@ -4,6 +4,7 @@ import com.bylazar.configurables.annotations.Configurable;
 import com.bylazar.telemetry.PanelsTelemetry;
 import com.bylazar.telemetry.TelemetryManager;
 import com.pedropathing.follower.Follower;
+import com.pedropathing.geometry.BezierCurve;
 import com.pedropathing.geometry.BezierLine;
 import com.pedropathing.geometry.Pose;
 import com.pedropathing.ivy.Command;
@@ -18,12 +19,16 @@ import static com.pedropathing.ivy.Scheduler.schedule;
 import static com.pedropathing.ivy.groups.Groups.sequential;
 import static com.pedropathing.ivy.pedro.PedroCommands.follow;
 
-@Autonomous(name = "Pedro Pathing Autonomous")
+@Autonomous(name = "Pedro Five Path Autonomous", group = "Autonomous")
 @Configurable
-public class PedroAutonomous extends OpMode {
-    private static final Pose START_POSE = new Pose(72, 72, Math.toRadians(90));
-    private static final Pose PATH_1_END_POSE = new Pose(72, 96, Math.toRadians(135));
-    private static final Pose PATH_2_END_POSE = new Pose(48, 120, Math.toRadians(180));
+public class PedroFivePathAutonomous extends OpMode {
+    private static final Pose START_POSE = new Pose(72, 48, Math.toRadians(90));
+    private static final Pose PATH_1_CONTROL_POSE = new Pose(120, 72);
+    private static final Pose PATH_1_END_POSE = new Pose(72, 96, Math.toRadians(90));
+    private static final Pose PATH_2_END_POSE = new Pose(72, 120, Math.toRadians(180));
+    private static final Pose PATH_3_CONTROL_POSE = new Pose(-24, 72);
+    private static final Pose PATH_3_END_POSE = new Pose(72, 24, Math.toRadians(90));
+    private static final Pose PATH_4_END_POSE = new Pose(96, 48, Math.toRadians(45));
 
     private TelemetryManager panelsTelemetry;
     public Follower follower;
@@ -62,10 +67,17 @@ public class PedroAutonomous extends OpMode {
     public static class Paths {
         public final PathChain path1;
         public final PathChain path2;
+        public final PathChain path3;
+        public final PathChain path4;
+        public final PathChain path5;
 
         public Paths(Follower follower) {
             path1 = follower.pathBuilder()
-                    .addPath(new BezierLine(START_POSE, PATH_1_END_POSE))
+                    .addPath(new BezierCurve(
+                            START_POSE,
+                            PATH_1_CONTROL_POSE,
+                            PATH_1_END_POSE
+                    ))
                     .setLinearHeadingInterpolation(
                             START_POSE.getHeading(),
                             PATH_1_END_POSE.getHeading()
@@ -73,10 +85,44 @@ public class PedroAutonomous extends OpMode {
                     .build();
 
             path2 = follower.pathBuilder()
-                    .addPath(new BezierLine(PATH_1_END_POSE, PATH_2_END_POSE))
+                    .addPath(new BezierLine(
+                            PATH_1_END_POSE,
+                            PATH_2_END_POSE
+                    ))
                     .setLinearHeadingInterpolation(
                             PATH_1_END_POSE.getHeading(),
                             PATH_2_END_POSE.getHeading()
+                    )
+                    .build();
+
+            path3 = follower.pathBuilder()
+                    .addPath(new BezierCurve(
+                            PATH_2_END_POSE,
+                            PATH_3_CONTROL_POSE,
+                            PATH_3_END_POSE
+                    ))
+                    .setLinearHeadingInterpolation(
+                            PATH_2_END_POSE.getHeading(),
+                            PATH_3_END_POSE.getHeading()
+                    )
+                    .build();
+
+            path4 = follower.pathBuilder()
+                    .addPath(new BezierLine(
+                            PATH_3_END_POSE,
+                            PATH_4_END_POSE
+                    ))
+                    .setTangentHeadingInterpolation()
+                    .build();
+
+            path5 = follower.pathBuilder()
+                    .addPath(new BezierLine(
+                            PATH_4_END_POSE,
+                            START_POSE
+                    ))
+                    .setLinearHeadingInterpolation(
+                            PATH_4_END_POSE.getHeading(),
+                            START_POSE.getHeading()
                     )
                     .build();
         }
@@ -85,7 +131,10 @@ public class PedroAutonomous extends OpMode {
     private Command autoRoutine() {
         return sequential(
                 follow(follower, paths.path1, false),
-                follow(follower, paths.path2, true)
+                follow(follower, paths.path2, false),
+                follow(follower, paths.path3, false),
+                follow(follower, paths.path4, false),
+                follow(follower, paths.path5, true)
         );
     }
 }
