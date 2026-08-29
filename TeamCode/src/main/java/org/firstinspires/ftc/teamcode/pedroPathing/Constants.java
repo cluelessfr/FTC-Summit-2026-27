@@ -21,7 +21,7 @@ public class Constants {
             .predictiveBrakingCoefficients(new PredictiveBrakingCoefficients(0.3, 0.04865805757317899, 0.002060183649320232))
             .mass(5.533827);
 
-    public static PathConstraints pathConstraints = new PathConstraints(0.97, 2000, 0.5, 0.1);
+    public static PathConstraints pathConstraints = new PathConstraints(0.97, 100, 1, 0.1);
 
     public static Follower createFollower(HardwareMap hardwareMap) {
         return new FollowerBuilder(followerConstants, hardwareMap)
