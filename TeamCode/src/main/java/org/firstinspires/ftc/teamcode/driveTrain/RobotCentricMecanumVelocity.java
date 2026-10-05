@@ -14,7 +14,7 @@ import com.qualcomm.robotcore.hardware.DcMotorSimple;
  * 2. Connect all four motor encoder cables.
  * 3. Match the hardware names below to the Robot Configuration.
  * 4. Enter the actual front chain sprocket tooth counts below.
- * 5. Test motor directions with the wheels raised and at a low MAX_SPEED_FRACTION.
+ * 5. Test motor directions with the wheels raised.
  */
 @TeleOp(name = "Robot-Centric Drive", group = "Drivetrain")
 public class RobotCentricMecanumVelocity extends LinearOpMode {
@@ -35,9 +35,13 @@ public class RobotCentricMecanumVelocity extends LinearOpMode {
     // The rear wheels are directly driven, so one motor revolution is one wheel revolution.
     private static final double REAR_WHEEL_REVS_PER_MOTOR_REV = 1.0;
 
-    // Begin conservatively. Increase only after checking target versus measured RPM under load.
-    private static final double MAX_SPEED_FRACTION = 1.00;
+    private static final double MAX_WHEEL_RPM = 312.0;
     private static final double JOYSTICK_DEADBAND = 0.05;
+    // Snap translation within 10 degrees of forward, backward, left, or right.
+    // Increase for more straight-line assistance; decrease for easier off-axis movement.
+    private static final double DIRECTION_SNAP_DEGREES = 10.0;
+    private static final double DIRECTION_SNAP_RATIO =
+            Math.tan(Math.toRadians(DIRECTION_SNAP_DEGREES));
 
     private DcMotorEx frontLeft;
     private DcMotorEx frontRight;
@@ -73,8 +77,8 @@ public class RobotCentricMecanumVelocity extends LinearOpMode {
         frontWheelRevsPerMotorRev =
                 FRONT_MOTOR_SPROCKET_TEETH / FRONT_WHEEL_SPROCKET_TEETH;
 
-        // Use the slowest wheel's achievable speed so all four wheels can reach every command.
-        maximumWheelRpm = MAX_SPEED_FRACTION * minimumAchievableWheelRpm();
+        // Never exceed 312 RPM or the slowest wheel's achievable speed.
+        maximumWheelRpm = Math.min(MAX_WHEEL_RPM, minimumAchievableWheelRpm());
 
         telemetry.addData("Status", "Initialized");
         telemetry.addData("Maximum wheel RPM", "%.1f", maximumWheelRpm);
@@ -93,6 +97,12 @@ public class RobotCentricMecanumVelocity extends LinearOpMode {
             double forward = applyDeadband(-gamepad1.left_stick_y);
             double strafe = applyDeadband(gamepad1.left_stick_x);
             double turn = applyDeadband(gamepad1.right_stick_x);
+
+            if (Math.abs(strafe) <= Math.abs(forward) * DIRECTION_SNAP_RATIO) {
+                strafe = 0.0;
+            } else if (Math.abs(forward) <= Math.abs(strafe) * DIRECTION_SNAP_RATIO) {
+                forward = 0.0;
+            }
 
             double frontLeftMix = forward + strafe + turn;
             double frontRightMix = forward - strafe - turn;
@@ -181,14 +191,18 @@ public class RobotCentricMecanumVelocity extends LinearOpMode {
     }
 
     private void validateConstants() {
+        if (!Double.isFinite(DIRECTION_SNAP_DEGREES)
+                || DIRECTION_SNAP_DEGREES < 0.0 || DIRECTION_SNAP_DEGREES >= 45.0) {
+            throw new IllegalArgumentException("DIRECTION_SNAP_DEGREES must be in [0, 45).");
+        }
         if (FRONT_MOTOR_SPROCKET_TEETH <= 0.0 || FRONT_WHEEL_SPROCKET_TEETH <= 0.0) {
             throw new IllegalArgumentException("Front sprocket tooth counts must be positive.");
         }
         if (REAR_WHEEL_REVS_PER_MOTOR_REV <= 0.0) {
             throw new IllegalArgumentException("Rear wheel ratio must be positive.");
         }
-        if (MAX_SPEED_FRACTION <= 0.0 || MAX_SPEED_FRACTION > 1.0) {
-            throw new IllegalArgumentException("MAX_SPEED_FRACTION must be in (0, 1].");
+        if (MAX_WHEEL_RPM <= 0.0) {
+            throw new IllegalArgumentException("MAX_WHEEL_RPM must be positive.");
         }
         if (JOYSTICK_DEADBAND < 0.0 || JOYSTICK_DEADBAND >= 1.0) {
             throw new IllegalArgumentException("JOYSTICK_DEADBAND must be in [0, 1).");

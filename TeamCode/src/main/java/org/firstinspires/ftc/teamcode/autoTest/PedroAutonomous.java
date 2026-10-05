@@ -4,19 +4,19 @@ import com.bylazar.configurables.annotations.Configurable;
 import com.bylazar.telemetry.PanelsTelemetry;
 import com.bylazar.telemetry.TelemetryManager;
 import com.pedropathing.follower.Follower;
-import com.pedropathing.geometry.BezierLine;
-import com.pedropathing.geometry.Pose;
 import com.pedropathing.ivy.Command;
 import com.pedropathing.ivy.Scheduler;
-import com.pedropathing.paths.PathChain;
+import com.pedropathing.math.Pose;
+import com.pedropathing.paths.Path;
 import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 
 import org.firstinspires.ftc.teamcode.pedroPathing.Constants;
 
 import static com.pedropathing.ivy.Scheduler.schedule;
+import static com.pedropathing.ivy.commands.Commands.instant;
 import static com.pedropathing.ivy.groups.Groups.sequential;
-import static com.pedropathing.ivy.pedro.PedroCommands.follow;
+import static com.pedropathing.api.Paths.line;
 
 @Autonomous(name = "Pedro Pathing Autonomous")
 @Configurable
@@ -35,8 +35,8 @@ public class PedroAutonomous extends OpMode {
         panelsTelemetry = PanelsTelemetry.INSTANCE.getTelemetry();
 
         follower = Constants.createFollower(hardwareMap);
-        follower.setStartingPose(START_POSE);
-        paths = new Paths(follower);
+        follower.setPose(START_POSE);
+        paths = new Paths();
 
         panelsTelemetry.debug("Status", "Initialized");
         panelsTelemetry.update(telemetry);
@@ -53,33 +53,25 @@ public class PedroAutonomous extends OpMode {
         Scheduler.execute();
 
         panelsTelemetry.debug("Follower Busy", follower.isBusy());
-        panelsTelemetry.debug("X", follower.getPose().getX());
-        panelsTelemetry.debug("Y", follower.getPose().getY());
-        panelsTelemetry.debug("Heading", follower.getPose().getHeading());
+        panelsTelemetry.debug("X", follower.pose().x());
+        panelsTelemetry.debug("Y", follower.pose().y());
+        panelsTelemetry.debug("Heading", follower.pose().heading());
         panelsTelemetry.update(telemetry);
     }
 
     public static class Paths {
-        public final PathChain path1;
-        public final PathChain path2;
+        public final Path path1;
+        public final Path path2;
 
-        public Paths(Follower follower) {
-            path1 = follower.pathBuilder()
-                    .addPath(new BezierLine(START_POSE, PATH_1_END_POSE))
-                    .setLinearHeadingInterpolation(
-                            START_POSE.getHeading(),
-                            PATH_1_END_POSE.getHeading()
-                    )
-                    .build();
-
-            path2 = follower.pathBuilder()
-                    .addPath(new BezierLine(PATH_1_END_POSE, PATH_2_END_POSE))
-                    .setLinearHeadingInterpolation(
-                            PATH_1_END_POSE.getHeading(),
-                            PATH_2_END_POSE.getHeading()
-                    )
-                    .build();
+        public Paths() {
+            path1 = line(START_POSE, PATH_1_END_POSE).linear(START_POSE, PATH_1_END_POSE);
+            path2 = line(PATH_1_END_POSE, PATH_2_END_POSE).linear(PATH_1_END_POSE, PATH_2_END_POSE);
         }
+    }
+
+    private static Command follow(Follower follower, Path path, boolean holdEnd) {
+        return instant(() -> follower.holdEnd.set(holdEnd))
+                .then(com.pedropathing.ivy.pedro.PedroCommands.follow(follower, path));
     }
 
     private Command autoRoutine() {

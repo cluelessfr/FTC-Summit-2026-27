@@ -19,7 +19,7 @@ import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
  * 3. Match the hardware names below to the Robot Configuration.
  * 4. Enter the actual front chain sprocket tooth counts below.
  * 5. Set the Control Hub logo and USB directions to match its physical mounting.
- * 6. Test motor directions with the wheels raised and at a low MAX_SPEED_FRACTION.
+ * 6. Test motor directions with the wheels raised.
  */
 @TeleOp(name = "Field-Centric Drive", group = "Drivetrain")
 public class FieldCentricMecanumVelocity extends LinearOpMode {
@@ -47,9 +47,13 @@ public class FieldCentricMecanumVelocity extends LinearOpMode {
     private static final RevHubOrientationOnRobot.UsbFacingDirection USB_FACING_DIRECTION =
             RevHubOrientationOnRobot.UsbFacingDirection.RIGHT;
 
-    // Begin conservatively. Increase only after checking target versus measured RPM under load.
-    private static final double MAX_SPEED_FRACTION = 1.0;
+    private static final double MAX_WHEEL_RPM = 312.0;
     private static final double JOYSTICK_DEADBAND = 0.05;
+    // Snap translation within 10 degrees of forward, backward, left, or right.
+    // Increase for more straight-line assistance; decrease for easier off-axis movement.
+    private static final double DIRECTION_SNAP_DEGREES = 10.0;
+    private static final double DIRECTION_SNAP_RATIO =
+            Math.tan(Math.toRadians(DIRECTION_SNAP_DEGREES));
 
     private DcMotorEx frontLeft;
     private DcMotorEx frontRight;
@@ -92,8 +96,8 @@ public class FieldCentricMecanumVelocity extends LinearOpMode {
         frontWheelRevsPerMotorRev =
                 FRONT_MOTOR_SPROCKET_TEETH / FRONT_WHEEL_SPROCKET_TEETH;
 
-        // Use the slowest wheel's achievable speed so all four wheels can reach every command.
-        maximumWheelRpm = MAX_SPEED_FRACTION * minimumAchievableWheelRpm();
+        // Never exceed 312 RPM or the slowest wheel's achievable speed.
+        maximumWheelRpm = Math.min(MAX_WHEEL_RPM, minimumAchievableWheelRpm());
 
         telemetry.addData("Status", "Initialized");
         telemetry.addData("Maximum wheel RPM", "%.1f", maximumWheelRpm);
@@ -124,6 +128,13 @@ public class FieldCentricMecanumVelocity extends LinearOpMode {
             double fieldForward = applyDeadband(-gamepad1.left_stick_y);
             double fieldStrafe = applyDeadband(gamepad1.left_stick_x);
             double turn = applyDeadband(gamepad1.right_stick_x);
+
+            // Snap in field coordinates before rotating into the robot's heading.
+            if (Math.abs(fieldStrafe) <= Math.abs(fieldForward) * DIRECTION_SNAP_RATIO) {
+                fieldStrafe = 0.0;
+            } else if (Math.abs(fieldForward) <= Math.abs(fieldStrafe) * DIRECTION_SNAP_RATIO) {
+                fieldForward = 0.0;
+            }
 
             double headingRadians =
                     imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.RADIANS);
@@ -223,14 +234,18 @@ public class FieldCentricMecanumVelocity extends LinearOpMode {
     }
 
     private void validateConstants() {
+        if (!Double.isFinite(DIRECTION_SNAP_DEGREES)
+                || DIRECTION_SNAP_DEGREES < 0.0 || DIRECTION_SNAP_DEGREES >= 45.0) {
+            throw new IllegalArgumentException("DIRECTION_SNAP_DEGREES must be in [0, 45).");
+        }
         if (FRONT_MOTOR_SPROCKET_TEETH <= 0.0 || FRONT_WHEEL_SPROCKET_TEETH <= 0.0) {
             throw new IllegalArgumentException("Front sprocket tooth counts must be positive.");
         }
         if (REAR_WHEEL_REVS_PER_MOTOR_REV <= 0.0) {
             throw new IllegalArgumentException("Rear wheel ratio must be positive.");
         }
-        if (MAX_SPEED_FRACTION <= 0.0 || MAX_SPEED_FRACTION > 1.0) {
-            throw new IllegalArgumentException("MAX_SPEED_FRACTION must be in (0, 1].");
+        if (MAX_WHEEL_RPM <= 0.0) {
+            throw new IllegalArgumentException("MAX_WHEEL_RPM must be positive.");
         }
         if (JOYSTICK_DEADBAND < 0.0 || JOYSTICK_DEADBAND >= 1.0) {
             throw new IllegalArgumentException("JOYSTICK_DEADBAND must be in [0, 1).");
