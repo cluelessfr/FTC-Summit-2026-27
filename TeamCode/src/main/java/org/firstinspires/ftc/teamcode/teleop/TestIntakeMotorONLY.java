@@ -10,19 +10,19 @@ import org.firstinspires.ftc.teamcode.intakeTest.IntakeMotor;
 public class TestIntakeMotorONLY extends LinearOpMode {
     @Override
     public void runOpMode() {
-        IntakeMotor intake = new IntakeMotor(hardwareMap);
+        IntakeMotor intakeMotor = new IntakeMotor(hardwareMap);
         try {
-            telemetry.addLine("Gamepad 1: A on/off; B reverse; D-pad speed; X 2796 ticks/sec.");
+            telemetry.addLine("Gamepad 1: A on/off; B reverse; intake runs at 100% power.");
             telemetry.update();
             waitForStart();
 
             while (opModeIsActive()) {
-                intake.update(gamepad1);
-                intake.addTelemetry(telemetry);
+                intakeMotor.update(gamepad1);
+                intakeMotor.addTelemetry(telemetry);
                 telemetry.update();
             }
         } finally {
-            intake.stop();
+            intakeMotor.stop();
         }
     }
 }

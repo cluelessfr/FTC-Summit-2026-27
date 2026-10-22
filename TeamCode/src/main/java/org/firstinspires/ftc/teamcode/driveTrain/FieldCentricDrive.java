@@ -67,16 +67,16 @@ public class FieldCentricDrive {
     }
 
     public void addInitializationTelemetry(Telemetry telemetry) {
-        telemetry.addData("Status", "Initialized");
+        telemetry.addData("Drive mode", "Field centric; left stick moves, right stick X turns");
         telemetry.addData("Hub orientation", "Logo %s, USB %s",
                 LOGO_FACING_DIRECTION, USB_FACING_DIRECTION);
-        telemetry.addLine("The robot's starting direction becomes field forward.");
-        telemetry.addLine("Press A while stopped to redefine field forward.");
+        telemetry.addLine("Hub IMU heading is relative to the last yaw reset.");
+        telemetry.addLine("D-pad down: reset field heading; stop before resetting.");
         telemetry.update();
     }
 
     public void update(Gamepad gamepad) {
-        boolean resetYawPressed = gamepad.y;
+        boolean resetYawPressed = gamepad.dpad_down;
         if (resetYawPressed && !resetYawWasPressed) {
             imu.resetYaw();
         }
@@ -124,12 +124,12 @@ public class FieldCentricDrive {
     }
 
     public void addTelemetry(Telemetry telemetry) {
-        telemetry.addData("Heading", "%.1f deg",
+        telemetry.addData("Drive heading (Hub IMU)", "%.1f deg",
                 imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.DEGREES));
-        telemetry.addLine("Y: reset field heading");
-        telemetry.addData("FL / FR power", "%.2f / %.2f",
+        telemetry.addLine("D-pad down: reset field heading");
+        telemetry.addData("FL / FR commanded power", "%.2f / %.2f",
                 frontLeft.getPower(), frontRight.getPower());
-        telemetry.addData("BL / BR power", "%.2f / %.2f",
+        telemetry.addData("BL / BR commanded power", "%.2f / %.2f",
                 backLeft.getPower(), backRight.getPower());
     }
 

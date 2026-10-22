@@ -47,7 +47,7 @@ public class RobotCentricDrive {
     }
 
     public void addInitializationTelemetry(Telemetry telemetry) {
-        telemetry.addLine("Robot Centric Drive Initialized");
+        telemetry.addLine("Robot centric: left stick moves relative to robot; right stick X turns.");
     }
 
     public void update(Gamepad gamepad) {
@@ -79,9 +79,9 @@ public class RobotCentricDrive {
     }
 
     public void addTelemetry(Telemetry telemetry) {
-        telemetry.addData("FL / FR power", "%.2f / %.2f",
+        telemetry.addData("FL / FR commanded power", "%.2f / %.2f",
                 frontLeft.getPower(), frontRight.getPower());
-        telemetry.addData("BL / BR power", "%.2f / %.2f",
+        telemetry.addData("BL / BR commanded power", "%.2f / %.2f",
                 backLeft.getPower(), backRight.getPower());
     }
 

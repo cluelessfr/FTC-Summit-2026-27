@@ -12,24 +12,24 @@ public class RobotCentricANDIntakeMotor extends LinearOpMode {
     public void runOpMode() {
         RobotCentricDrive drive = new RobotCentricDrive(hardwareMap);
         try {
-            IntakeMotor intake = new IntakeMotor(hardwareMap);
+            IntakeMotor intakeMotor = new IntakeMotor(hardwareMap);
             try {
                 telemetry.addData("Status", "Initialized");
                 drive.addInitializationTelemetry(telemetry);
-                telemetry.addLine("Gamepad 1: sticks drive; A intake on/off; B reverse;");
-                telemetry.addLine("D-pad intake speed; X 2796 ticks/sec.");
+                telemetry.addLine("Gamepad 1: left stick moves; right stick X turns; A intake on/off; B reverse.");
+                telemetry.addLine("Intake runs at 100% power when on.");
                 telemetry.update();
                 waitForStart();
 
                 while (opModeIsActive()) {
                     drive.update(gamepad1);
-                    intake.update(gamepad1);
+                    intakeMotor.update(gamepad1);
                     drive.addTelemetry(telemetry);
-                    intake.addTelemetry(telemetry);
+                    intakeMotor.addTelemetry(telemetry);
                     telemetry.update();
                 }
             } finally {
-                intake.stop();
+                intakeMotor.stop();
             }
         } finally {
             drive.stop();
