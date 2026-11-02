@@ -26,6 +26,7 @@ public class FieldCentricANDIntakeMotor extends LinearOpMode {
                 waitForStart();
 
                 while (opModeIsActive()) {
+                    pinpoint.update();
                     drive.update(gamepad1);
                     intakeMotor.update(gamepad1);
                     drive.addTelemetry(telemetry);

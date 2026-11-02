@@ -27,6 +27,10 @@ public class FieldCentricDrive {
     private final InitializePinpoint pinpoint;
     private double headingOffsetRadians = 0;
     private boolean resetYawWasPressed;
+    private double holdHeadingRadians;
+    private boolean headingHoldActive = false;
+    private static final double HEADING_HOLD_KP = 0.5;
+    private static final double MAX_HOLD_TURN = 0.2;
 
     public FieldCentricDrive(HardwareMap hardwareMap, InitializePinpoint pinpoint) {
         validateConstants();
@@ -70,6 +74,27 @@ public class FieldCentricDrive {
         double fieldStrafe = applyDeadband(gamepad.left_stick_x);
         double turn = applyDeadband(gamepad.right_stick_x);
 
+        double currentHeading = pinpoint.getHeadingRadians();
+        boolean driverTurning = turn != 0.0;
+        boolean driverMoving = fieldForward != 0.0 || fieldStrafe != 0.0;
+
+        if (driverTurning || !driverMoving) {
+            headingHoldActive = false;
+        }
+        else {
+            if (!headingHoldActive) {
+                holdHeadingRadians = currentHeading;
+                headingHoldActive = true;
+            }
+
+            double error = holdHeadingRadians - currentHeading;
+
+            // Choose the shortest rotation, including across the ±180° boundary.
+            error = Math.atan2(Math.sin(error), Math.cos(error));
+
+            turn = Math.max(-MAX_HOLD_TURN, Math.min(MAX_HOLD_TURN, HEADING_HOLD_KP * error));
+        }
+
         // Snap in field coordinates before rotating into the robot's heading.
         if (Math.abs(fieldStrafe) <= Math.abs(fieldForward) * DIRECTION_SNAP_RATIO) {
             fieldStrafe = 0.0;
@@ -105,6 +130,7 @@ public class FieldCentricDrive {
 
     public void resetHeading() {
         headingOffsetRadians = pinpoint.getHeadingRadians();
+        headingHoldActive = false;
     }
 
     public void addTelemetry(Telemetry telemetry) {

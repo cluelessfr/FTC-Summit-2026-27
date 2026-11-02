@@ -29,6 +29,7 @@ public class FieldCentricDriveONLY extends LinearOpMode {
             drive.resetHeading();
 
             while (opModeIsActive()) {
+                pinpoint.update();
                 drive.update(gamepad1);
                 drive.addTelemetry(telemetry);
                 telemetry.update();
