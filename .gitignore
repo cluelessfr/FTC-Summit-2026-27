@@ -78,4 +78,10 @@ lint/intermediates/
 lint/generated/
 lint/outputs/
 lint/tmp/
-# lint/reports/
+# lint/reports/# These paths contain generated data and third-party runtimes, not robot code.
+/hive_ml/runtime/
+/hive_ml/field-cad-step.step
+/hive_ml/mesh_*.npz
+/hive_ml/images/
+/hive_ml/cad_runtime/
+/hive_ml/__pycache__/

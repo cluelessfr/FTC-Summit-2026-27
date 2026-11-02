@@ -1,16 +1,20 @@
 package org.firstinspires.ftc.teamcode.teleop;
 
+import com.qualcomm.robotcore.eventloop.opmode.Disabled;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import org.firstinspires.ftc.teamcode.driveTrain.FieldCentricDrive;
 import org.firstinspires.ftc.teamcode.intakeTest.IntakeMotor;
+import org.firstinspires.ftc.teamcode.localization.InitializePinpoint;
 
 /** Runs the shared drivetrain and intake controllers in one TeleOp loop. */
+@Disabled
 @TeleOp(name = "Field Centric Drive + Intake Motor ONLY", group = "Intake Test")
 public class FieldCentricANDIntakeMotor extends LinearOpMode {
     @Override
     public void runOpMode() {
-        FieldCentricDrive drive = new FieldCentricDrive(hardwareMap);
+        InitializePinpoint pinpoint = new InitializePinpoint(hardwareMap);
+        FieldCentricDrive drive = new FieldCentricDrive(hardwareMap, pinpoint);
         try {
             IntakeMotor intakeMotor = new IntakeMotor(hardwareMap);
             try {

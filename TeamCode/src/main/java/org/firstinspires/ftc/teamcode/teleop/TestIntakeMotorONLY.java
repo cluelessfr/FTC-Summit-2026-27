@@ -1,11 +1,13 @@
 package org.firstinspires.ftc.teamcode.teleop;
 
+import com.qualcomm.robotcore.eventloop.opmode.Disabled;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 
 import org.firstinspires.ftc.teamcode.intakeTest.IntakeMotor;
 
 /** Standalone TeleOp for the shared intake test controls. */
+@Disabled
 @TeleOp(name = "Intake Motor ONLY")
 public class TestIntakeMotorONLY extends LinearOpMode {
     @Override

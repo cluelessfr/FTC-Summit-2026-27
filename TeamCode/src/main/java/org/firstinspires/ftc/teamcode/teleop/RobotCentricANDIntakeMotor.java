@@ -1,5 +1,6 @@
 package org.firstinspires.ftc.teamcode.teleop;
 
+import com.qualcomm.robotcore.eventloop.opmode.Disabled;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import org.firstinspires.ftc.teamcode.driveTrain.RobotCentricDrive;
@@ -7,6 +8,7 @@ import org.firstinspires.ftc.teamcode.intakeTest.IntakeMotor;
 
 /** Runs the shared drivetrain and intake controllers in one TeleOp loop. */
 @TeleOp(name = "Robot Centric Drive + Intake Motor ONLY", group = "Intake Test")
+@Disabled
 public class RobotCentricANDIntakeMotor extends LinearOpMode {
     @Override
     public void runOpMode() {

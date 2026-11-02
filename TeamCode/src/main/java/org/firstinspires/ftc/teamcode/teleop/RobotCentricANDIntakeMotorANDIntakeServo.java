@@ -7,7 +7,7 @@ import org.firstinspires.ftc.teamcode.intakeTest.IntakeMotor;
 import org.firstinspires.ftc.teamcode.intakeTest.IntakeServos;
 
 /** Runs the shared drivetrain and intake controllers in one TeleOp loop. */
-@TeleOp(name = "Robot Centric Drive + Intake Motor + Intake Servos ONLY", group = "Intake Test")
+@TeleOp(name = "Robot Centric Drive + Intake Motor + Intake Servos + Single ONLY", group = "Intake Test")
 public class RobotCentricANDIntakeMotorANDIntakeServo extends LinearOpMode {
     @Override
     public void runOpMode() {

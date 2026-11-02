@@ -1,10 +1,12 @@
 package org.firstinspires.ftc.teamcode.teleop;
 
+import com.qualcomm.robotcore.eventloop.opmode.Disabled;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 
 import org.firstinspires.ftc.teamcode.driveTrain.RobotCentricDrive;
 
+@Disabled
 @TeleOp(name = "Robot Centric Drive ONLY", group = "Drivetrain ONLY")
 public class RobotCentricDriveONLY extends LinearOpMode {
     @Override

@@ -22,10 +22,10 @@ public class RobotCentricDrive {
     private static final double DIRECTION_SNAP_RATIO =
             Math.tan(Math.toRadians(DIRECTION_SNAP_DEGREES));
 
-    private DcMotorEx frontLeft;
-    private DcMotorEx frontRight;
-    private DcMotorEx backLeft;
-    private DcMotorEx backRight;
+    private final DcMotorEx frontLeft;
+    private final DcMotorEx frontRight;
+    private final DcMotorEx backLeft;
+    private final DcMotorEx backRight;
 
     public RobotCentricDrive(HardwareMap hardwareMap) {
         validateConstants();
