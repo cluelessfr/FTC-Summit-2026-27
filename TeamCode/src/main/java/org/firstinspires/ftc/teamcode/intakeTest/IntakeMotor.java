@@ -39,10 +39,8 @@ public class IntakeMotor {
     }
 
     public void addTelemetry(Telemetry telemetry) {
-        telemetry.addLine("Intake: A toggles on/off; B reverses; 100% power when on.");
-        telemetry.addData("Intake status", intakeRunning ? "RUNNING" : "STOPPED");
-        telemetry.addData("Intake direction", intakeDirection == 1 ? "FORWARD" : "REVERSE");
-        telemetry.addData("Intake commanded power", "%.0f%%", intakeMotor.getPower() * 100.0);
+        telemetry.addData("Intake", "%s; %s", intakeRunning ? "ON" : "OFF",
+                intakeDirection == 1 ? "FORWARD" : "REVERSE");
     }
 
     public void stop() {

@@ -36,14 +36,14 @@ public final class Constants {
     });
 
     public static final PinpointConfig localizerConfig = new PinpointConfig(c -> {
-        c.xPodOffset.set(-2.9852448711245074);
-        c.yPodOffset.set(-0.32456141194020915);
-        c.offsetUnits.set(DistanceUnit.INCH);
+        c.xPodOffset.set(-159.5);
+        c.yPodOffset.set(-132.0);
+        c.offsetUnits.set(DistanceUnit.MM);
         c.globalDistanceUnit.set(DistanceUnit.INCH);
         c.name.set("pinpoint");
         c.podType.set(GoBildaPinpointDriver.GoBildaOdometryPods.goBILDA_SWINGARM_POD);
         c.xPodDirection.set(GoBildaPinpointDriver.EncoderDirection.REVERSED);
-        c.yPodDirection.set(GoBildaPinpointDriver.EncoderDirection.REVERSED);
+        c.yPodDirection.set(GoBildaPinpointDriver.EncoderDirection.FORWARD);
     });
 
     public static Follower createFollower(HardwareMap hardwareMap) {

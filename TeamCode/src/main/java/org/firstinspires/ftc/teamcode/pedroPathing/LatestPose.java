@@ -35,4 +35,8 @@ public class LatestPose {
     public static boolean getHasPose() {
         return hasPose;
     }
+
+    public static void clearPose() {
+        hasPose = false;
+    }
 }

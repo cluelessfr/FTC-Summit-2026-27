@@ -19,7 +19,7 @@ public class IntakeServos {
     private boolean nextXPositionIs045 = true;
     private boolean lastY = false;
     private boolean nextYPositionIs052 = true;
-    private final double fullyBack = 0.13;
+    private final double fullyBack = 0.07;
 
     public IntakeServos(HardwareMap hardwareMap) {
         String servo_1_name = "servo1";
@@ -47,8 +47,8 @@ public class IntakeServos {
         }
 
         if (xPressed) {
-            double nectarHeight = 0.2;
-            double pollenHeight = 0.3;
+            double nectarHeight = 0.17;
+            double pollenHeight = 0.27;
             double position = nextXPositionIs045 ? nectarHeight : pollenHeight;
             SERVO_1.setPosition(position);
             SERVO_2.setPosition(position);
@@ -69,11 +69,8 @@ public class IntakeServos {
     }
 
     public void addTelemetry(Telemetry telemetry) {
-        telemetry.addLine("Servos: X alternates nectar 0.20 / pollen 0.30; Y returns to 0.13.");
-        telemetry.addData("Servo adjustment", "D-pad left/right: -/+ %.2f; hold repeats every %.0f ms", POSITION_STEP, REPEAT_INTERVAL_MS);
-        telemetry.addLine("Servo positions are commands (0-1); servo2 direction is reversed.");
-        telemetry.addData("Servo 1 commanded position (0-1)", "%.2f", SERVO_1.getPosition());
-        telemetry.addData("Servo 2 commanded position (0-1)", "%.2f", SERVO_2.getPosition());
+        telemetry.addData("Servo commands (0-1)", "%.2f / %.2f",
+                SERVO_1.getPosition(), SERVO_2.getPosition());
     }
 
     public void stop() {

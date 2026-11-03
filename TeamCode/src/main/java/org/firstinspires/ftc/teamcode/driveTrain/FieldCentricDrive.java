@@ -5,6 +5,7 @@ import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.Gamepad;
 import com.qualcomm.robotcore.hardware.HardwareMap;
+import com.qualcomm.robotcore.util.ElapsedTime;
 
 import org.firstinspires.ftc.robotcore.external.Telemetry;
 import org.firstinspires.ftc.teamcode.localization.InitializePinpoint;
@@ -29,8 +30,25 @@ public class FieldCentricDrive {
     private boolean resetYawWasPressed;
     private double holdHeadingRadians;
     private boolean headingHoldActive = false;
-    private static final double HEADING_HOLD_KP = 0.5;
+    private double headingErrorRadians;
+    private double turnCorrection;
+    private double translationScale = 1;
+    private static final double HEADING_HOLD_KP = 1;
     private static final double MAX_HOLD_TURN = 0.2;
+    private static final double HEADING_SETTLE_TOLERANCE = Math.toRadians(1);
+    private static final double HEADING_SETTLE_SECONDS = 0.25;
+    private static final double HEADING_STOP_TIMEOUT_SECONDS = 2.0;
+    private final ElapsedTime headingStopTimer = new ElapsedTime();
+    private final ElapsedTime headingSettleTimer = new ElapsedTime();
+
+    private static final double TRANSLATION_KP = 0.01; // power per inch/sec of sideways drift
+    private static final double MAX_TRANSLATION_CORRECTION = 0.15;
+    private double sidewaysDriftSpeed;
+    private double measuredForwardSpeed;
+    private double measuredStrafeSpeed;
+    private double forwardCorrection;
+    private double strafeCorrection;
+    private boolean translationCorrectionActive;
 
     public FieldCentricDrive(HardwareMap hardwareMap, InitializePinpoint pinpoint) {
         validateConstants();
@@ -53,13 +71,7 @@ public class FieldCentricDrive {
     }
 
     public void addInitializationTelemetry(Telemetry telemetry) {
-        telemetry.addData("Drive mode", "Field centric with Pinpoint");
-        telemetry.addData("Pod offsets (mm)", "X %.2f / Y %.2f",
-                pinpoint.getXPodOffset(), pinpoint.getYPodOffset());
-        telemetry.addLine("Drive heading uses Pinpoint with a driver heading offset.");
-        telemetry.addLine("Gamepad 1: left stick moves; right stick X turns.");
-        telemetry.addLine("Gamepad 1 D-pad up: reset drive heading; stop before resetting.");
-        telemetry.addData("Drive direction snap (deg)", "%.1f", DIRECTION_SNAP_DEGREES);
+        telemetry.addLine("GP1: left stick move; right stick turn; D-pad up reset heading.");
         addTelemetry(telemetry);
     }
 
@@ -77,11 +89,19 @@ public class FieldCentricDrive {
         double currentHeading = pinpoint.getHeadingRadians();
         boolean driverTurning = turn != 0.0;
         boolean driverMoving = fieldForward != 0.0 || fieldStrafe != 0.0;
+        headingErrorRadians = 0;
+        turnCorrection = 0;
 
-        if (driverTurning || !driverMoving) {
+        if (driverMoving || driverTurning) {
+            headingStopTimer.reset();
+            headingSettleTimer.reset();
+        }
+
+        if (driverTurning) {
             headingHoldActive = false;
         }
-        else {
+        else if (driverMoving || headingHoldActive) {
+            // Keep holding after releasing the stick to correct drift while stopping.
             if (!headingHoldActive) {
                 holdHeadingRadians = currentHeading;
                 headingHoldActive = true;
@@ -92,7 +112,19 @@ public class FieldCentricDrive {
             // Choose the shortest rotation, including across the ±180° boundary.
             error = Math.atan2(Math.sin(error), Math.cos(error));
 
-            turn = Math.max(-MAX_HOLD_TURN, Math.min(MAX_HOLD_TURN, HEADING_HOLD_KP * error));
+            headingErrorRadians = error;
+            if (Math.abs(error) > HEADING_SETTLE_TOLERANCE) {
+                headingSettleTimer.reset();
+            }
+            // Release after settling, or after the timeout, until the driver moves again.
+            if (!driverMoving && (headingStopTimer.seconds() >= HEADING_STOP_TIMEOUT_SECONDS
+                    || headingSettleTimer.seconds() >= HEADING_SETTLE_SECONDS)) {
+                headingHoldActive = false;
+                headingErrorRadians = 0;
+            } else {
+                turnCorrection = clip(-HEADING_HOLD_KP * error, MAX_HOLD_TURN);
+            }
+            turn = turnCorrection;
         }
 
         // Snap in field coordinates before rotating into the robot's heading.
@@ -110,6 +142,42 @@ public class FieldCentricDrive {
         double sine = Math.sin(headingRadians);
         double robotForward = fieldForward * cosine - fieldStrafe * sine;
         double robotStrafe = fieldStrafe * cosine + fieldForward * sine;
+
+        // Pinpoint uses field X/Y with left positive; drive strafe is right positive.
+        double velocityX = pinpoint.getXVelocityInches();
+        double velocityY = pinpoint.getYVelocityInches();
+        double fieldCosine = Math.cos(currentHeading);
+        double fieldSine = Math.sin(currentHeading);
+        measuredForwardSpeed = velocityX * fieldCosine + velocityY * fieldSine;
+        measuredStrafeSpeed = velocityX * fieldSine - velocityY * fieldCosine;
+
+        forwardCorrection = 0;
+        strafeCorrection = 0;
+        sidewaysDriftSpeed = 0;
+        double movementMagnitude = Math.hypot(robotForward, robotStrafe);
+        translationCorrectionActive = movementMagnitude > 0 && pinpoint.isReady()
+                && Double.isFinite(measuredForwardSpeed) && Double.isFinite(measuredStrafeSpeed);
+        if (translationCorrectionActive) {
+            // Correct only motion perpendicular to the stick direction, leaving speed to the driver.
+            double perpendicularForward = -robotStrafe / movementMagnitude;
+            double perpendicularStrafe = robotForward / movementMagnitude;
+            sidewaysDriftSpeed = measuredForwardSpeed * perpendicularForward
+                    + measuredStrafeSpeed * perpendicularStrafe;
+            double correction = clip(-TRANSLATION_KP * sidewaysDriftSpeed, MAX_TRANSLATION_CORRECTION);
+            forwardCorrection = correction * perpendicularForward;
+            strafeCorrection = correction * perpendicularStrafe;
+            robotForward += forwardCorrection;
+            robotStrafe += strafeCorrection;
+        }
+
+        // Leave room for heading correction while moving instead of scaling the turn down.
+        translationScale = 1;
+        double translationMagnitude = Math.abs(robotForward) + Math.abs(robotStrafe);
+        if (headingHoldActive && translationMagnitude > 0) {
+            translationScale = Math.min(1.0, (1.0 - Math.abs(turn)) / translationMagnitude);
+            robotForward *= translationScale;
+            robotStrafe *= translationScale;
+        }
 
         double frontLeftMix = robotForward + robotStrafe + turn;
         double frontRightMix = robotForward - robotStrafe - turn;
@@ -131,19 +199,17 @@ public class FieldCentricDrive {
     public void resetHeading() {
         headingOffsetRadians = pinpoint.getHeadingRadians();
         headingHoldActive = false;
+        headingErrorRadians = 0;
+        turnCorrection = 0;
     }
 
     public void addTelemetry(Telemetry telemetry) {
-        telemetry.addLine("Gamepad 1 D-pad up: reset drive heading");
+        pinpoint.addTelemetry(telemetry);
         telemetry.addData("Drive heading (deg)", "%.1f",
                 Math.toDegrees(pinpoint.getHeadingRadians() - headingOffsetRadians));
-        telemetry.addData("Drive heading offset (deg)", "%.1f", Math.toDegrees(headingOffsetRadians));
-        telemetry.addData("FL / FR commanded power (%)", "%.0f / %.0f",
-                frontLeft.getPower() * 100.0, frontRight.getPower() * 100.0);
-        telemetry.addData("BL / BR commanded power (%)", "%.0f / %.0f",
-                backLeft.getPower() * 100.0, backRight.getPower() * 100.0);
-        telemetry.addLine();
-        pinpoint.addTelemetry(telemetry);
+        telemetry.addData("Heading hold", headingHoldActive ? "ON; error %.1f deg" : "OFF",
+                Math.toDegrees(headingErrorRadians));
+        telemetry.addData("Drift correction", translationCorrectionActive ? "ON" : "OFF");
     }
 
     private void configureForPowerControl(DcMotorEx motor) {
@@ -155,7 +221,12 @@ public class FieldCentricDrive {
         return Math.abs(value) < JOYSTICK_DEADBAND ? 0.0 : value;
     }
 
+    private double clip(double value, double limit) {
+        return Math.max(-limit, Math.min(limit, value));
+    }
+
     public void stop() {
+        headingHoldActive = false;
         frontLeft.setPower(0.0);
         frontRight.setPower(0.0);
         backLeft.setPower(0.0);

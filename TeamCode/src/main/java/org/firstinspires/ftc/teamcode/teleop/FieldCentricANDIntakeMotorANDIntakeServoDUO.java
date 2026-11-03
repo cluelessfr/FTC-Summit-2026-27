@@ -21,7 +21,7 @@ public class FieldCentricANDIntakeMotorANDIntakeServoDUO extends LinearOpMode {
             try {
                 telemetry.addData("Status", "Initialized; waiting for Start");
                 drive.addInitializationTelemetry(telemetry);
-                telemetry.addLine("Gamepad 2 controls intake motor and servos.");
+                telemetry.addLine("GP2: A intake; B reverse; X presets; Y retract; D-pad left/right adjust.");
                 intakeMotor.addTelemetry(telemetry);
                 intakeServos.addTelemetry(telemetry);
                 telemetry.update();
@@ -32,9 +32,7 @@ public class FieldCentricANDIntakeMotorANDIntakeServoDUO extends LinearOpMode {
                     drive.update(gamepad1);
                     intakeMotor.update(gamepad2);
                     intakeServos.update(gamepad2);
-                    telemetry.addData("Status", "Running");
                     drive.addTelemetry(telemetry);
-                    telemetry.addLine("Gamepad 2 controls intake motor and servos.");
                     intakeMotor.addTelemetry(telemetry);
                     intakeServos.addTelemetry(telemetry);
                     telemetry.update();
