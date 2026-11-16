@@ -7,6 +7,7 @@ import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import org.firstinspires.ftc.teamcode.flywheelTest.FlywheelMotor;
 
 /** Standalone TeleOp for the shared flywheel test controls. */
+@Disabled
 @TeleOp(name = "Flywheel Motor ONLY")
 public class FlywheelMotorONLY extends LinearOpMode {
     @Override

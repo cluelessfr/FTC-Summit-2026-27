@@ -11,36 +11,25 @@ import org.firstinspires.ftc.robotcore.external.Telemetry;
 public class IntakeMotor {
 
     private final DcMotorEx intakeMotor;
-    private int intakeDirection = 1;
     private boolean intakeRunning = false;
-    private boolean lastA = false;
-    private boolean lastB = false;
+    private boolean lastPress = false;
 
     public IntakeMotor(HardwareMap hardwareMap) {
         intakeMotor = hardwareMap.get(DcMotorEx.class, "intakeMotor");
-        intakeMotor.setDirection(DcMotorSimple.Direction.FORWARD);
+        intakeMotor.setDirection(DcMotorSimple.Direction.REVERSE);
         intakeMotor.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
         intakeMotor.setPower(0.0);
     }
 
     public void update(Gamepad gamepad) {
-        if (gamepad.a && !lastA) {
+        if (gamepad.cross && !lastPress) {
             intakeRunning = !intakeRunning;
         }
-        lastA = gamepad.a;
-
-        if (gamepad.b && !lastB) {
-            intakeDirection *= -1;
-        }
-        lastB = gamepad.b;
-
-        // Run at full power in the selected direction whenever the intake is on.
-        intakeMotor.setPower(intakeRunning ? intakeDirection : 0.0);
+        lastPress = gamepad.cross;
     }
 
     public void addTelemetry(Telemetry telemetry) {
-        telemetry.addData("Intake", "%s; %s", intakeRunning ? "ON" : "OFF",
-                intakeDirection == 1 ? "FORWARD" : "REVERSE");
+        telemetry.addData("Intake", "%s", intakeRunning ? "ON" : "OFF");
     }
 
     public void stop() {
