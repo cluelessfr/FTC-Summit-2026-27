@@ -26,6 +26,8 @@ public class IntakeMotor {
             intakeRunning = !intakeRunning;
         }
         lastPress = gamepad.cross;
+
+        intakeMotor.setPower(intakeRunning ? 1 : 0.0);
     }
 
     public void addTelemetry(Telemetry telemetry) {

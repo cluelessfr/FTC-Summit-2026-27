@@ -1,5 +1,7 @@
 # Parallel blue hive turrets (position mode)
 
+For the current independent POLLEN turret, see [AprilTag opening aim](#apriltag-opening-aim). The parallel turret design below is historical.
+
 `TeamCode/src/main/java/org/firstinspires/ftc/teamcode/turret/BlueHiveTurret.java`
 is a reusable subsystem, not a separate drive OpMode. The three existing Pedro
 autonomous test OpModes now use it. No drive TeleOp or robot constants were changed.
@@ -129,7 +131,7 @@ does not issue a new target or return the turret forward.
 Imports:
 
 ```java
-import org.firstinspires.ftc.teamcode.turret.BlueHiveTurret;
+
 import com.pedropathing.math.Pose;
 ```
 
@@ -174,20 +176,45 @@ reference must not reset Pinpoint's global field pose.
 
 ## Verification boundary
 
-The hardware-independent checks cover the pair midpoint and 7-inch axis separation,
-rear offset, wrapped headings, equivalent-angle choice, forward offset and reversed
-gearing, position mapping, safe endpoints, cable limits, unreachable targets,
-standalone pose construction and the handoff. Compilation checks the installed
-Pedro 3.0.1 and FTC SDK APIs. These checks cannot verify actual aim, parallelism,
-wire clearance, field placement or the transition on the robot; those require
-physical tests after calibration.
-
-Run the checks from the repository root after compiling:
+Run the hardware-independent POLLEN checks from the repository root:
 
 ```powershell
-.\gradlew.bat :TeamCode:compileDebugJavaWithJavac --offline
 .\scripts\check-blue-hive-turret.ps1
 ```
 
-The check script uses the installed production SDK/library jars, compiles a plain
-Java harness under `TeamCode/build/turret-checks`, and requires no new dependencies.
+This compiles the current turret sources against cached FTC SDK libraries and
+checks tag geometry, bearing signs, and servo limits. Physical aiming still
+needs a robot test.
+
+## AprilTag opening aim
+
+For a standalone test, enter the measured servo positions and camera mount at
+the top of `PollenTurret.java`, then select **Pollen Turret ONLY** on the
+Driver Station. START commands POLLEN home and begins tracking. Check the
+reported opening and POLLEN yaw with the robot stationary.
+
+On Limelight OS 2026.0, configure a 36h11 AprilTag pipeline in slot 0 or pass
+the slot to the `PollenTurret` constructor. Enable full 3D targeting, set
+the marker size to 82.55 mm, allow blue IDs 38–45, and leave all pipeline 3D
+offsets at zero. `HiveOpeningAim` uses the detected tag's camera-space pose
+to place the aim point 2 inches (50.8 mm) behind the center of the upward
+CELL opening, toward the back of the CELL. The offset depends on the tag
+ID and whether that tag is on the upward or downward CELL.
+
+The default constructor uses the calibration in `PollenTurret.java`. Measure
+the lens position from the POLLEN axis with the turret at forward zero, in
+meters (+forward, +left, +up). Enter the camera angles in degrees. Positive yaw
+turns left, positive pitch points up, and positive roll raises the left side.
+Verify servo home, direction, gearing, and travel limits before START.
+
+The servo hardware name is `pollenTurret`. The ratio is turret degrees per servo
+degree and the direction sign is +1 when increasing servo position turns the
+turret right. The servo driver sets 500–2500 µs on devices that expose the PWM
+range. For different geometry, an OpMode can call
+`configureOpeningAim(cameraMount, pollenAxis, nectarAxis)` before `start()`
+with both axes in a shared robot coordinate frame.
+
+Call `pollen.update()` in the OpMode loop and `pollen.stop()` on exit. POLLEN owns
+the Limelight and calculates the opening from frames captured after its servo
+command settles. Verify the opening and POLLEN bearing on a level, stationary
+robot with the HIVE tipped both ways. The NECTAR controller is deferred.

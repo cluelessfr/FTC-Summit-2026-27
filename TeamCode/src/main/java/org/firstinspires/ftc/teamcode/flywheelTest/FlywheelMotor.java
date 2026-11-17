@@ -15,7 +15,7 @@ public class FlywheelMotor {
 
     public FlywheelMotor(HardwareMap hardwareMap) {
         flywheelMotor = hardwareMap.get(DcMotorEx.class, "flywheelMotor");
-        flywheelMotor.setDirection(DcMotorSimple.Direction.REVERSE);
+        flywheelMotor.setDirection(DcMotorSimple.Direction.FORWARD);
         flywheelMotor.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
         flywheelMotor.setPower(0.0);
     }

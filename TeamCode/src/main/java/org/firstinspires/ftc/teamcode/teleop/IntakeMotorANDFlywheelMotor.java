@@ -9,7 +9,6 @@ import org.firstinspires.ftc.teamcode.intakeTest.IntakeMotor;
 import org.firstinspires.ftc.teamcode.localization.InitializePinpoint;
 
 /** Runs the shared drivetrain and intake controllers in one TeleOp loop. */
-@Disabled
 @TeleOp(name = "Intake Motor + Flywheel Motor ONLY", group = "Test")
 public class IntakeMotorANDFlywheelMotor extends LinearOpMode {
     @Override

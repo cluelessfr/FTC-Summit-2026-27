@@ -4,17 +4,17 @@ import com.qualcomm.hardware.limelightvision.LLResult;
 import com.qualcomm.hardware.limelightvision.LLResultTypes;
 import com.qualcomm.hardware.limelightvision.Limelight3A;
 import com.qualcomm.robotcore.hardware.HardwareMap;
-import com.qualcomm.robotcore.hardware.PwmControl;
-import com.qualcomm.robotcore.hardware.Servo;
-import com.qualcomm.robotcore.hardware.ServoImplEx;
 
 import org.firstinspires.ftc.robotcore.external.Telemetry;
+import org.firstinspires.ftc.teamcode.turret.HiveOpeningAim.CameraMount;
+import org.firstinspires.ftc.teamcode.turret.HiveOpeningAim.OpeningAim;
+import org.firstinspires.ftc.teamcode.turret.HiveOpeningAim.Vector;
 
 import java.util.List;
 import java.util.Locale;
 
 /**
- * Tracks blue BIOBUZZ AprilTags with a turret-mounted Limelight 3A.
+ * Aims POLLEN at the upward blue BIOBUZZ CELL and provides both launcher bearings.
  *
  * Standalone subsystem, NOT an OpMode. Call start(), update(), addTelemetry(),
  * and stop() from the eventual TeleOp.
@@ -27,7 +27,7 @@ import java.util.Locale;
  * No encoder is used: all turret angles are estimates from servo commands.
  * Set the external gearing ratio, direction and home alignment correctly.
  */
-public class BlueHiveAprilTags {
+public final class PollenTurret {
 
     public enum TargetCell {
         ANY_BLUE,               // IDs 38-45
@@ -35,38 +35,46 @@ public class BlueHiveAprilTags {
         OPPOSITE_AUDIENCE_SIDE  // IDs 42-45
     }
 
-    private static final String SERVO_NAME = "turret";
+    private static final String SERVO_NAME = "pollenTurret";
     private static final String LIMELIGHT_NAME = "limelight";
     private static final int DEFAULT_APRILTAG_PIPELINE = 0; // Change to your 36h11 pipeline.
 
-    // Positional goBILDA 2000-0025-0004: nominally 300 servo degrees across 500-2500 us.
-    private static final double SERVO_TRAVEL_DEGREES = 300.0;
-    private static final double SERVO_MIN = 0.0;
-    private static final double SERVO_MAX = 1.0;
+    // Verify the servo home, limits, travel, gearing, and direction on the robot.
     private static final double SERVO_HOME = 0.5;
+    private static final double SERVO_MIN = 0;
+    private static final double SERVO_MAX = 1;
+    private static final double SERVO_TRAVEL_DEGREES = 300;
+    private static final double TURRET_DEGREES_PER_SERVO_DEGREE = 5.4 / 3.5;
+    private static final double SERVO_RIGHT_SIGN = 1; // +1 if increasing position turns right.
+    private static final TurretServo.Calibration DEFAULT_CALIBRATION =
+            new TurretServo.Calibration(SERVO_HOME, SERVO_MIN, SERVO_MAX, SERVO_TRAVEL_DEGREES,
+                    TURRET_DEGREES_PER_SERVO_DEGREE, SERVO_RIGHT_SIGN);
 
-    // ONLY EDIT THIS NUMBER FOR EXTERNAL GEARING.
-    // Gear ratio = TURRET degrees of rotation / SERVO output degrees of rotation.
-    // Example: turret rotates 5.4 degrees per 3.5 degrees of servo rotation.
-    // 5.4 / 3.5 gives a turret speed multiplier of about 1.54x.
-    // Do NOT include the servo's built-in gearbox ratio.
-    private static final double GEAR_RATIO = 5.4 / 3.5;
+    // Measure the lens from the POLLEN rotation axis with the turret at home.
+    private static final double LENS_FORWARD_METERS = -0.035;
+    private static final double LENS_LEFT_METERS = 0;
+    private static final double LENS_UP_METERS = 0.1;
+    // Positive yaw turns left, positive pitch points up, and positive roll raises the left side.
+    private static final double CAMERA_YAW_DEGREES = 0;
+    private static final double CAMERA_PITCH_UP_DEGREES = 50;
+    private static final double CAMERA_ROLL_DEGREES = 0;
+    private static final CameraMount DEFAULT_CAMERA_MOUNT = new CameraMount(
+            new Vector(LENS_FORWARD_METERS, LENS_LEFT_METERS, LENS_UP_METERS),
+            Math.toRadians(CAMERA_YAW_DEGREES), Math.toRadians(CAMERA_PITCH_UP_DEGREES),
+            Math.toRadians(CAMERA_ROLL_DEGREES));
+    private static final Vector POLLEN_AXIS_ORIGIN = new Vector(0, 0, 0);
 
-    // +1 if increasing servo position turns the camera clockwise (right);
-    // -1 if increasing servo position turns the camera counterclockwise (left).
-    private static final double DIRECTION_SIGN = 1.0;
-
-    private static final double CAMERA_AIM_OFFSET_DEGREES = 0.0;
     private static final double TRACKING_KP = 0.45;
     private static final double AIM_TOLERANCE_DEGREES = 1.25;
     private static final double MAX_TURRET_CORRECTION_DEGREES = 10.0;
     private static final double MAX_SERVO_SPEED_DEGREES_PER_SEC = 240.0;
     private static final double TAG_LOST_TIMEOUT_SECONDS = 0.40;
     private static final long MAX_FRAME_STALENESS_MS = 120;
+    private static final long POLLEN_SETTLE_MS = 250;
+    private static final long HOME_SETTLE_MS = 1000;
 
     // When a wrap-around path is selected, continue along it even after the
     // AprilTag leaves the camera view. Give it time to become visible again.
-    private static final double WRAP_REACQUIRE_WINDOW_DEGREES = 12.0;
     private static final double WRAP_ARRIVAL_SERVO_TOLERANCE = 0.008;
     private static final double WRAP_REACQUIRE_WAIT_SECONDS = 0.85;
     private static final double WRAP_MAX_SECONDS = 4.0;
@@ -76,14 +84,20 @@ public class BlueHiveAprilTags {
     private static final double WRAP_TRIGGER_MARGIN_DEGREES = 5.0;
     private static final double WRAP_FAILED_STATUS_SECONDS = 1.5;
 
-    private final Servo turretServo;
+    private final TurretServo servo;
+    private final TurretServo.Calibration calibration;
     private final Limelight3A limelight;
     private final int aprilTagPipeline;
 
+    private CameraMount cameraMount;
+    private Vector pollenAxis;
+    private Vector nectarAxis;
+    private OpeningAim openingAim;
+    private long pollenSettlesAtNanos;
     private TargetCell targetCell = TargetCell.ANY_BLUE;
     private boolean started = false;
-    private double commandedServoPosition = SERVO_HOME;
-    private double targetServoPosition = SERVO_HOME;
+    private double commandedServoPosition;
+    private double targetServoPosition;
     private double lastFrameTimestamp = Double.NaN;
     private long lastUpdateNanos = 0L;
     private long lastSeenNanos = 0L;
@@ -98,46 +112,73 @@ public class BlueHiveAprilTags {
     private int wrapTagId = -1;
     private double wrapTargetAngleDegrees = Double.NaN;
 
-    public BlueHiveAprilTags(HardwareMap hardwareMap) {
+    public PollenTurret(HardwareMap hardwareMap) {
         this(hardwareMap, DEFAULT_APRILTAG_PIPELINE);
     }
 
-    public BlueHiveAprilTags(HardwareMap hardwareMap, int aprilTagPipeline) {
-        if (aprilTagPipeline < 0) {
-            throw new IllegalArgumentException("AprilTag pipeline index cannot be negative.");
-        }
-        if (!Double.isFinite(GEAR_RATIO)
-                || GEAR_RATIO <= 0.0
-                || (DIRECTION_SIGN != 1.0 && DIRECTION_SIGN != -1.0)
-                || SERVO_HOME < SERVO_MIN || SERVO_HOME > SERVO_MAX) {
-            throw new IllegalArgumentException("Invalid turret gearing, direction or home.");
-        }
+    public PollenTurret(HardwareMap hardwareMap, int aprilTagPipeline) {
+        this(hardwareMap, aprilTagPipeline, DEFAULT_CALIBRATION);
+    }
 
+    public PollenTurret(HardwareMap hardwareMap, int aprilTagPipeline,
+                        TurretServo.Calibration calibration) {
+        if (aprilTagPipeline < 0 || calibration == null) {
+            throw new IllegalArgumentException("Set a valid pipeline and POLLEN calibration.");
+        }
         this.aprilTagPipeline = aprilTagPipeline;
-        turretServo = hardwareMap.get(Servo.class, SERVO_NAME);
+        this.calibration = calibration;
+        commandedServoPosition = calibration.home;
+        targetServoPosition = calibration.home;
+        servo = new TurretServo(hardwareMap, SERVO_NAME);
         limelight = hardwareMap.get(Limelight3A.class, LIMELIGHT_NAME);
-
-        turretServo.setDirection(Servo.Direction.FORWARD);
-        if (turretServo instanceof ServoImplEx) {
-            ((ServoImplEx) turretServo).setPwmRange(new PwmControl.PwmRange(500, 2500));
+        if (hasDefaultCameraMeasurements()) {
+            // POLLEN-only aiming uses the POLLEN pivot as the origin for both bearings.
+            configureOpeningAim(DEFAULT_CAMERA_MOUNT, POLLEN_AXIS_ORIGIN, POLLEN_AXIS_ORIGIN);
         }
-        // Otherwise configure a full-range servo in FTC Robot Configuration.
+    }
+
+    public static boolean hasDefaultCameraMeasurements() {
+        return isValidMount(DEFAULT_CAMERA_MOUNT);
+    }
+
+    private static boolean isValidMount(CameraMount mount) {
+        return mount != null && mount.lensFromPollenAxis != null
+                && mount.lensFromPollenAxis.isFinite()
+                && Double.isFinite(mount.yaw) && Double.isFinite(mount.pitch) && Double.isFinite(mount.roll);
+    }
+
+    /** Override the default mount and turret positions before start. Positions are in meters. */
+    public void configureOpeningAim(CameraMount cameraMount, Vector pollenAxis, Vector nectarAxis) {
+        if (started) throw new IllegalStateException("Configure the aim before starting.");
+        if (!isValidMount(cameraMount) || pollenAxis == null || nectarAxis == null
+                || !pollenAxis.isFinite() || !nectarAxis.isFinite()) {
+            throw new IllegalArgumentException("Set a finite camera mount and both turret positions.");
+        }
+        this.cameraMount = cameraMount;
+        this.pollenAxis = pollenAxis;
+        this.nectarAxis = nectarAxis;
     }
 
     /** Starts tracking and homes the servo; verify mechanical clearance first. */
     public void start() {
+        if (cameraMount == null) {
+            trackingStatus = "CONFIGURE CAMERA MOUNT AND TURRET AXES";
+            return;
+        }
         started = true;
-        commandedServoPosition = SERVO_HOME;
-        targetServoPosition = SERVO_HOME;
+        commandedServoPosition = calibration.home;
+        targetServoPosition = calibration.home;
         lastFrameTimestamp = Double.NaN;
         lastUpdateNanos = System.nanoTime();
+        pollenSettlesAtNanos = lastUpdateNanos + HOME_SETTLE_MS * 1_000_000L;
         lastSeenNanos = 0L;
+        openingAim = null;
         trackedTagId = -1;
         txDegrees = Double.NaN;
         resetWrap();
         trackingStatus = "SEARCHING";
         wrapFailedNanos = 0L;
-        turretServo.setPosition(SERVO_HOME);
+        servo.setPosition(calibration.home);
         limelight.pipelineSwitch(aprilTagPipeline);
         limelight.start();
     }
@@ -160,43 +201,28 @@ public class BlueHiveAprilTags {
             resetWrap();
             targetServoPosition = commandedServoPosition;
             lastSeenNanos = 0L;
+            openingAim = null;
             trackedTagId = -1;
             txDegrees = Double.NaN;
             trackingStatus = "OTHER PIPELINE ACTIVE";
             return;
         }
 
-        boolean freshFrame = result != null && result.isValid()
-                && result.getStaleness() <= MAX_FRAME_STALENESS_MS
+        long frameAgeMs = result == null ? -1 : result.getStaleness();
+        boolean freshFrame = frameAgeMs >= 0 && frameAgeMs <= MAX_FRAME_STALENESS_MS
                 && Double.isFinite(result.getTimestamp())
                 && Double.compare(result.getTimestamp(), lastFrameTimestamp) != 0;
 
         if (freshFrame) {
             lastFrameTimestamp = result.getTimestamp();
-            List<LLResultTypes.FiducialResult> tags = result.getFiducialResults();
-
-            if (wrapping) {
-                // Don't switch to another tag mid-wrap. The camera will lose
-                // the original tag while traversing the longer route.
-                LLResultTypes.FiducialResult lockedTag = findTag(tags, wrapTagId);
-                if (lockedTag != null) {
-                    txDegrees = lockedTag.getTargetXDegrees();
-                    lastSeenNanos = now;
-                    if (wrapArrivedNanos != 0L
-                            || Math.abs(txDegrees - CAMERA_AIM_OFFSET_DEGREES)
-                            <= WRAP_REACQUIRE_WINDOW_DEGREES) {
-                        // Original tag is visible in roughly the correct direction:
-                        // hand control back to the standard fine-aiming controller.
-                        resetWrap();
-                        aimAtTag(lockedTag, now);
-                    }
-                }
-            } else {
-                LLResultTypes.FiducialResult tag = chooseBlueTag(tags);
-                if (tag != null) {
-                    aimAtTag(tag, now);
-                } else {
-                    trackingStatus = "TAG TEMPORARILY LOST";
+            double delayMs = frameAgeMs + result.getCaptureLatency() + result.getTargetingLatency();
+            // The camera moves with POLLEN. Use only exposures taken after the last
+            // command settled, so its commanded yaw is also the yaw at capture.
+            if (Double.isFinite(delayMs) && delayMs >= 0
+                    && now - delayMs * 1_000_000 >= pollenSettlesAtNanos) {
+                if (!result.isValid() || !aimFromTags(result.getFiducialResults(), now)) {
+                    openingAim = null;
+                    if (!wrapping) trackingStatus = "NO STABLE CELL OPENING";
                 }
             }
         }
@@ -215,9 +241,10 @@ public class BlueHiveAprilTags {
             if (timedOut || failedToReacquire) {
                 resetWrap();
                 lastSeenNanos = 0L;
+                openingAim = null;
                 trackedTagId = -1;
                 txDegrees = Double.NaN;
-                targetServoPosition = SERVO_HOME;
+                targetServoPosition = calibration.home;
                 trackingStatus = "WRAP FAILED - RETURNING HOME";
                 wrapFailedNanos = now;
             } else {
@@ -227,11 +254,12 @@ public class BlueHiveAprilTags {
         } else {
             boolean recentlySeen = lastSeenNanos != 0L &&
                     now - lastSeenNanos < secondsToNanos(TAG_LOST_TIMEOUT_SECONDS);
-            if (!recentlySeen) {
+            if (!recentlySeen && now >= pollenSettlesAtNanos + MAX_FRAME_STALENESS_MS * 1_000_000L) {
                 trackedTagId = -1;
                 txDegrees = Double.NaN;
-                targetServoPosition = SERVO_HOME;
-                boolean atHome = Math.abs(commandedServoPosition - SERVO_HOME) < 0.005;
+                openingAim = null;
+                targetServoPosition = calibration.home;
+                boolean atHome = Math.abs(commandedServoPosition - calibration.home) < 0.005;
                 if (wrapFailedNanos != 0L
                         && now - wrapFailedNanos < secondsToNanos(WRAP_FAILED_STATUS_SECONDS)) {
                     trackingStatus = "WRAP FAILED - RETURNING HOME";
@@ -241,29 +269,32 @@ public class BlueHiveAprilTags {
             }
         }
 
-        double maxStep = MAX_SERVO_SPEED_DEGREES_PER_SEC * dt / SERVO_TRAVEL_DEGREES;
-        commandedServoPosition = moveTowards(commandedServoPosition,
-                clip(targetServoPosition, SERVO_MIN, SERVO_MAX), maxStep);
-        turretServo.setPosition(commandedServoPosition);
+        double maxStep = MAX_SERVO_SPEED_DEGREES_PER_SEC * dt / calibration.travelDegrees;
+        double nextPosition = TurretServo.moveTowards(commandedServoPosition,
+                calibration.limit(targetServoPosition), maxStep);
+        if (nextPosition != commandedServoPosition) {
+            commandedServoPosition = nextPosition;
+            servo.setPosition(commandedServoPosition);
+            pollenSettlesAtNanos = now + POLLEN_SETTLE_MS * 1_000_000L;
+        }
     }
 
-    /** Process the camera bearing (positive tx means target to camera right). */
-    private void aimAtTag(LLResultTypes.FiducialResult tag, long now) {
-        trackedTagId = tag.getFiducialId();
-        txDegrees = tag.getTargetXDegrees();
+    private void aimAtOpening(OpeningAim aim, long now) {
+        trackedTagId = aim.tagId;
+        openingAim = aim;
         lastSeenNanos = now;
 
-        double errorDegrees = txDegrees - CAMERA_AIM_OFFSET_DEGREES;
+        double currentTurretAngle = calibration.rightDegrees(commandedServoPosition);
+        double errorDegrees = openingErrorDegrees(aim.pollenYaw, currentTurretAngle);
         if (Math.abs(errorDegrees) <= AIM_TOLERANCE_DEGREES) {
             targetServoPosition = commandedServoPosition;
             trackingStatus = "ALIGNED";
             return;
         }
 
-        double currentTurretAngle = servoToTurretAngle(commandedServoPosition);
         double desiredTurretAngle = currentTurretAngle + errorDegrees;
-        double endA = servoToTurretAngle(SERVO_MIN);
-        double endB = servoToTurretAngle(SERVO_MAX);
+        double endA = calibration.rightDegrees(calibration.min);
+        double endB = calibration.rightDegrees(calibration.max);
         double minAngle = Math.min(endA, endB);
         double maxAngle = Math.max(endA, endB);
 
@@ -273,8 +304,7 @@ public class BlueHiveAprilTags {
             double overshoot = Math.max(minAngle - desiredTurretAngle,
                     desiredTurretAngle - maxAngle);
             double alternateAngle = overshoot > WRAP_TRIGGER_MARGIN_DEGREES
-                    ? findReachableWrappedAngle(desiredTurretAngle,
-                    currentTurretAngle, minAngle, maxAngle)
+                    ? calibration.nearestReachableRightDegrees(desiredTurretAngle, currentTurretAngle)
                     : Double.NaN;
             if (Double.isFinite(alternateAngle)) {
                 wrapping = true;
@@ -282,7 +312,7 @@ public class BlueHiveAprilTags {
                 wrapArrivedNanos = 0L;
                 wrapTagId = trackedTagId;
                 wrapTargetAngleDegrees = alternateAngle;
-                targetServoPosition = clip(turretAngleToServo(alternateAngle), SERVO_MIN, SERVO_MAX);
+                targetServoPosition = calibration.limit(calibration.position(alternateAngle));
                 trackingStatus = "WRAPPING INSIDE LIMITS";
                 return;
             }
@@ -292,45 +322,21 @@ public class BlueHiveAprilTags {
             double safeAngle = clip(desiredTurretAngle, minAngle, maxAngle);
             double correction = clip(TRACKING_KP * (safeAngle - currentTurretAngle),
                     -MAX_TURRET_CORRECTION_DEGREES, MAX_TURRET_CORRECTION_DEGREES);
-            targetServoPosition = clip(turretAngleToServo(currentTurretAngle + correction),
-                    SERVO_MIN, SERVO_MAX);
+            targetServoPosition = calibration.limit(calibration.position(currentTurretAngle + correction));
             trackingStatus = "TARGET OUT OF REACH";
             return;
         }
 
         double correctionDegrees = clip(TRACKING_KP * errorDegrees,
                 -MAX_TURRET_CORRECTION_DEGREES, MAX_TURRET_CORRECTION_DEGREES);
-        targetServoPosition = clip(turretAngleToServo(currentTurretAngle + correctionDegrees),
-                SERVO_MIN, SERVO_MAX);
+        targetServoPosition = calibration.limit(calibration.position(currentTurretAngle + correctionDegrees));
         trackingStatus = "TRACKING";
     }
 
-    /**
-     * Find desiredAngle + 360*k within the mechanical interval (k != 0).
-     * Choose the one that requires the least physical movement from currentAngle.
-     * Returns NaN if even the long route is not mechanically reachable.
-     */
-    private static double findReachableWrappedAngle(double desiredAngle, double currentAngle,
-                                                    double minAngle, double maxAngle) {
-        long minK = (long) Math.ceil((minAngle - desiredAngle) / FULL_TURN_DEGREES);
-        long maxK = (long) Math.floor((maxAngle - desiredAngle) / FULL_TURN_DEGREES);
-        if (minK > maxK) {
-            return Double.NaN;
-        }
-        long closestK = Math.round((currentAngle - desiredAngle) / FULL_TURN_DEGREES);
-        long chosenK = Math.max(minK, Math.min(maxK, closestK));
-        return chosenK == 0L ? Double.NaN : desiredAngle + chosenK * FULL_TURN_DEGREES;
-    }
-
-    /** Increases in this angle correspond to looking right from the robot. */
-    private static double servoToTurretAngle(double servoPosition) {
-        return DIRECTION_SIGN * (servoPosition - SERVO_HOME)
-                * SERVO_TRAVEL_DEGREES * GEAR_RATIO;
-    }
-
-    private static double turretAngleToServo(double turretAngleDegrees) {
-        return SERVO_HOME + DIRECTION_SIGN * turretAngleDegrees
-                / (SERVO_TRAVEL_DEGREES * GEAR_RATIO);
+    static double openingErrorDegrees(double openingYawRadians, double currentRightDegrees) {
+        // The geometry reports positive left. The servo mapping uses positive right.
+        return Math.IEEEremainder(-Math.toDegrees(openingYawRadians) - currentRightDegrees,
+                FULL_TURN_DEGREES);
     }
 
     /** Optional: restrict tracking to one of the two blue cells. */
@@ -344,6 +350,7 @@ public class BlueHiveAprilTags {
         trackedTagId = -1;
         txDegrees = Double.NaN;
         lastSeenNanos = 0L;
+        openingAim = null;
     }
 
     public boolean hasRecentBlueTag() {
@@ -355,9 +362,14 @@ public class BlueHiveAprilTags {
         return trackedTagId;
     }
 
+    /** Latest usable target and both bearings, with positive yaw pointing left. */
+    public OpeningAim getOpeningAim() {
+        return hasRecentBlueTag() ? openingAim : null;
+    }
+
     public void addInitializationTelemetry(Telemetry telemetry) {
-        telemetry.addLine("Blue AprilTag turret: auto tracking with boundary-aware aiming.");
-        telemetry.addLine("Check external gearing, servo direction, home, and 36h11 pipeline.");
+        telemetry.addLine("Blue AprilTag turret: aims at the upward CELL opening.");
+        telemetry.addLine("Check camera mount, turret axes, servo calibration, and 3D pipeline.");
         addTelemetry(telemetry);
     }
 
@@ -368,11 +380,19 @@ public class BlueHiveAprilTags {
         telemetry.addData("Locked tag", trackedTagId < 0 ? "none" : trackedTagId);
         telemetry.addData("AprilTag tx (deg)",
                 Double.isFinite(txDegrees) ? String.format(Locale.US, "%.2f", txDegrees) : "--");
-        telemetry.addData("Turret gearing (turret/servo)", "%.4f", GEAR_RATIO);
+        OpeningAim aim = getOpeningAim();
+        if (aim != null) {
+            telemetry.addData("CELL up", aim.audienceCellUp ? "audience" : "opposite audience");
+            telemetry.addData("CELL aim point forward/left/up (m)", "%.3f / %.3f / %.3f",
+                    aim.opening.x, aim.opening.y, aim.opening.z);
+            telemetry.addData("POLLEN / NECTAR yaw (deg, +left)", "%.2f / %.2f",
+                    Math.toDegrees(aim.pollenYaw), Math.toDegrees(aim.nectarYaw));
+        }
+        telemetry.addData("Turret gearing (turret/servo)", "%.4f", calibration.turretPerServoDegree);
         telemetry.addData("Turret angle est (deg)", "%.1f",
-                servoToTurretAngle(commandedServoPosition));
+                calibration.rightDegrees(commandedServoPosition));
         telemetry.addData("Turret total travel (deg)", "%.1f",
-                SERVO_TRAVEL_DEGREES * (SERVO_MAX - SERVO_MIN) * GEAR_RATIO);
+                calibration.travelDegrees * (calibration.max - calibration.min) * calibration.turretPerServoDegree);
         telemetry.addData("Wrap route active", wrapping);
         if (wrapping) {
             telemetry.addData("Wrap destination (deg)", "%.1f", wrapTargetAngleDegrees);
@@ -380,13 +400,14 @@ public class BlueHiveAprilTags {
         telemetry.addData("Turret servo command", "%.3f", commandedServoPosition);
         telemetry.addData("Turret servo target", "%.3f", targetServoPosition);
         telemetry.addData("At servo limit",
-                commandedServoPosition <= SERVO_MIN + 0.001
-                        || commandedServoPosition >= SERVO_MAX - 0.001);
+                commandedServoPosition <= calibration.min + 0.001
+                        || commandedServoPosition >= calibration.max - 0.001);
     }
 
     /** Stops Limelight polling; leaves the turret in its last commanded position. */
     public void stop() {
         started = false;
+        openingAim = null;
         resetWrap();
         trackingStatus = "STOPPED";
         limelight.stop();
@@ -400,60 +421,49 @@ public class BlueHiveAprilTags {
         wrapTargetAngleDegrees = Double.NaN;
     }
 
-    private LLResultTypes.FiducialResult chooseBlueTag(
-            List<LLResultTypes.FiducialResult> tags) {
-        if (tags == null || tags.isEmpty()) {
-            return null;
-        }
-        LLResultTypes.FiducialResult best = null;
+    private boolean aimFromTags(List<LLResultTypes.FiducialResult> tags, long now) {
+        if (tags == null || (wrapping && wrapArrivedNanos == 0L)) return false;
+        double pollenYaw = Math.toRadians(-calibration.rightDegrees(commandedServoPosition));
+        OpeningAim best = null;
+        LLResultTypes.FiducialResult bestTag = null;
         for (LLResultTypes.FiducialResult tag : tags) {
-            if (tag == null || !isAllowedTag(tag.getFiducialId())
-                    || !Double.isFinite(tag.getTargetXDegrees())) {
+            if (tag == null || !isAllowedTag(tag.getFiducialId())) continue;
+            if (wrapping && tag.getFiducialId() != wrapTagId) continue;
+            OpeningAim aim = HiveOpeningAim.estimateOpening(HiveOpeningAim.Alliance.BLUE,
+                    tag, cameraMount, pollenYaw, pollenAxis, nectarAxis);
+            if (aim == null || !Double.isFinite(aim.pollenYaw) || !Double.isFinite(aim.nectarYaw)) {
                 continue;
             }
-            if (tag.getFiducialId() == trackedTagId) {
-                return tag;
+            if (bestTag == null || tag.getTargetArea() > bestTag.getTargetArea()
+                    || tag.getFiducialId() == trackedTagId) {
+                best = aim;
+                bestTag = tag;
             }
-            if (best == null || Math.abs(tag.getTargetXDegrees())
-                    < Math.abs(best.getTargetXDegrees())) {
-                best = tag;
-            }
+            if (tag.getFiducialId() == trackedTagId) break;
         }
-        return best;
-    }
-
-    private LLResultTypes.FiducialResult findTag(
-            List<LLResultTypes.FiducialResult> tags, int id) {
-        if (tags == null) {
-            return null;
-        }
-        for (LLResultTypes.FiducialResult tag : tags) {
-            if (tag != null && tag.getFiducialId() == id && isAllowedTag(id)
-                    && Double.isFinite(tag.getTargetXDegrees())) {
-                return tag;
-            }
-        }
-        return null;
+        if (best == null) return false;
+        if (wrapping) resetWrap();
+        txDegrees = bestTag.getTargetXDegrees();
+        aimAtOpening(best, now);
+        return true;
     }
 
     private boolean isAllowedTag(int id) {
+        HiveOpeningAim.Alliance alliance = HiveOpeningAim.Alliance.BLUE;
+        if (!alliance.accepts(id)) return false;
         switch (targetCell) {
             case AUDIENCE_SIDE:
-                return id >= 38 && id <= 41;
+                return alliance.isAudienceTag(id);
             case OPPOSITE_AUDIENCE_SIDE:
-                return id >= 42 && id <= 45;
+                return !alliance.isAudienceTag(id);
             case ANY_BLUE:
             default:
-                return id >= 38 && id <= 45;
+                return true;
         }
     }
 
     private static long secondsToNanos(double seconds) {
         return (long) (seconds * 1_000_000_000.0);
-    }
-
-    private static double moveTowards(double current, double target, double maxChange) {
-        return current + clip(target - current, -maxChange, maxChange);
     }
 
     private static double clip(double value, double min, double max) {

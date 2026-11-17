@@ -13,7 +13,6 @@ import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 
 import org.firstinspires.ftc.teamcode.pedroPathing.Constants;
 import org.firstinspires.ftc.teamcode.pedroPathing.LatestPose;
-import org.firstinspires.ftc.teamcode.turret.BlueHiveTurret;
 
 import static com.pedropathing.ivy.Scheduler.schedule;
 import static com.pedropathing.ivy.commands.Commands.instant;
@@ -35,7 +34,6 @@ public class PedroFivePathAutonomous extends OpMode {
     private TelemetryManager panelsTelemetry;
     public Follower follower;
     private Paths paths;
-    private BlueHiveTurret turret;
 
     @Override
     public void init() {
@@ -44,7 +42,6 @@ public class PedroFivePathAutonomous extends OpMode {
 
         follower = Constants.createFollower(hardwareMap);
         follower.setPose(START_POSE);
-        turret = BlueHiveTurret.forAutonomous(hardwareMap);
         paths = new Paths();
 
         panelsTelemetry.debug("Status", "Initialized");
@@ -53,27 +50,23 @@ public class PedroFivePathAutonomous extends OpMode {
 
     @Override
     public void start() {
-        turret.start();
         schedule(autoRoutine());
     }
 
     @Override
     public void loop() {
         follower.update();
-        turret.update(follower.pose());
         Scheduler.execute();
 
         panelsTelemetry.debug("Follower Busy", follower.isBusy());
         panelsTelemetry.debug("Pose X (in)", follower.pose().x());
         panelsTelemetry.debug("Pose Y (in)", follower.pose().y());
         panelsTelemetry.debug("Pose heading (radians)", follower.pose().heading());
-        turret.addTelemetry(telemetry);
         panelsTelemetry.update(telemetry);
     }
 
     @Override
     public void stop() {
-        if (turret != null) turret.stop();
         if (follower != null) follower.stop();
         Scheduler.reset();
         LatestPose.setPose(follower.pose().x(), follower.pose().y(), follower.pose().heading());

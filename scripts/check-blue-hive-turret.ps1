@@ -1,10 +1,6 @@
 param()
 $ErrorActionPreference = 'Stop'
 $turretRepo = Split-Path -Parent $PSScriptRoot
-$turretClasses = Join-Path $turretRepo 'TeamCode/build/intermediates/javac/debug/compileDebugJavaWithJavac/classes'
-if (!(Test-Path (Join-Path $turretClasses 'org/firstinspires/ftc/teamcode/turret/BlueHiveTurret.class'))) {
-    throw 'Compile production code first: .\gradlew.bat :TeamCode:compileDebugJavaWithJavac --offline'
-}
 $turretOutput = Join-Path $turretRepo 'TeamCode/build/turret-checks'
 New-Item -ItemType Directory -Path $turretOutput -Force | Out-Null
 $turretGradleRoot = if ($env:GRADLE_USER_HOME) { $env:GRADLE_USER_HOME } else { Join-Path $env:USERPROFILE '.gradle' }
@@ -23,22 +19,21 @@ function Get-TurretLibraryJar($group, $artifact, $version) {
     finally { $zip.Dispose() }
     return $destination
 }
-$turretClasspath = @($turretClasses)
+$turretClasspath = @()
 foreach ($library in @(
     @('org.firstinspires.ftc', 'RobotCore'),
-    @('org.firstinspires.ftc', 'Hardware'),
-    @('com.pedropathing', 'revhub')
+    @('org.firstinspires.ftc', 'Hardware')
 )) {
     $pattern = [regex]::Escape("$($library[0]):$($library[1]):") + "([^']+)"
     $version = [regex]::Match($turretDependencies, $pattern).Groups[1].Value
     if (!$version) { throw "No declared version for $($library[1])" }
     $turretClasspath += Get-TurretLibraryJar $library[0] $library[1] $version
-    if ($library[1] -eq 'revhub') {
-        $turretClasspath += Get-TurretLibraryJar 'com.pedropathing' 'core' $version
-    }
 }
 $turretCp = $turretClasspath -join [IO.Path]::PathSeparator
-& javac -cp $turretCp -d $turretOutput (Join-Path $turretRepo 'tests/turret/BlueHiveTurretChecks.java')
+$turretSource = Join-Path $turretRepo 'TeamCode/src/main/java/org/firstinspires/ftc/teamcode/turret'
+$sources = @('PollenTurret.java', 'HiveOpeningAim.java', 'TurretServo.java') |
+    ForEach-Object { Join-Path $turretSource $_ }
+& javac -cp $turretCp -d $turretOutput @sources (Join-Path $turretRepo 'tests/turret/BlueHiveTurretChecks.java')
 if ($LASTEXITCODE -ne 0) { throw 'Turret checks compilation failed' }
 & java -cp ($turretCp + [IO.Path]::PathSeparator + $turretOutput) org.firstinspires.ftc.teamcode.turret.BlueHiveTurretChecks
 if ($LASTEXITCODE -ne 0) { throw 'Turret checks failed' }
