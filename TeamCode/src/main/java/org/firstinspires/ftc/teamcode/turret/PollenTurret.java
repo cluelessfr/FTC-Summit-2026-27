@@ -79,7 +79,7 @@ public final class PollenTurret {
     private static final double AIM_TOLERANCE_DEGREES = 1.25;
     private static final double MAX_TURRET_CORRECTION_DEGREES = 10.0;
     private static final double MAX_SERVO_SPEED_DEGREES_PER_SEC = 240.0;
-    private static final double TAG_LOST_TIMEOUT_SECONDS = 0.40;
+    private static final double TAG_LOST_TIMEOUT_SECONDS = 0.80;
     // The HIVE can flip. Do not trust a remembered opening indefinitely.
     private static final double DEFAULT_ODOMETRY_TARGET_MAX_AGE_SECONDS = 10.0;
     private static final long MAX_FRAME_STALENESS_MS = 120;
