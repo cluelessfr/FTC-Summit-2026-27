@@ -3,14 +3,19 @@ package org.firstinspires.ftc.teamcode.teleop;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 
+import org.firstinspires.ftc.teamcode.turret.HiveOpeningAim.Alliance;
 import org.firstinspires.ftc.teamcode.turret.PollenTurret;
+import org.firstinspires.ftc.teamcode.localization.InitializePinpoint;
 
 /** Standalone AprilTag aiming test for the POLLEN turret. */
 @TeleOp(name = "Pollen Turret ONLY")
 public class PollenTurretONLY extends LinearOpMode {
+    // Enable after measuring the axis relative to Pinpoint's robot reference.
+
     @Override
     public void runOpMode() {
-        PollenTurret pollenTurret = new PollenTurret(hardwareMap);
+        InitializePinpoint pinpoint = new InitializePinpoint(hardwareMap);
+        PollenTurret pollenTurret = new PollenTurret(hardwareMap, pinpoint, Alliance.BLUE);
 
         if (!PollenTurret.hasDefaultCameraMeasurements()) {
             telemetry.addLine("Enter the camera mount measurements in PollenTurret.java.");
@@ -19,7 +24,6 @@ public class PollenTurretONLY extends LinearOpMode {
             return;
         }
 
-        telemetry.addLine("Start homes POLLEN and begins AprilTag aiming. Keep the robot stationary.");
         pollenTurret.addInitializationTelemetry(telemetry);
         telemetry.update();
         waitForStart();
@@ -29,6 +33,7 @@ public class PollenTurretONLY extends LinearOpMode {
         try {
             pollenTurret.start();
             while (opModeIsActive()) {
+                pinpoint.update();
                 pollenTurret.update();
                 pollenTurret.addTelemetry(telemetry);
                 telemetry.update();

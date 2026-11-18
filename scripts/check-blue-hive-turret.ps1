@@ -31,9 +31,14 @@ foreach ($library in @(
 }
 $turretCp = $turretClasspath -join [IO.Path]::PathSeparator
 $turretSource = Join-Path $turretRepo 'TeamCode/src/main/java/org/firstinspires/ftc/teamcode/turret'
-$sources = @('PollenTurret.java', 'HiveOpeningAim.java', 'TurretServo.java') |
+$sources = @('PollenTurret.java', 'HiveOpeningAim.java', 'TurretServo.java', 'OdometryTargetTracker.java') |
     ForEach-Object { Join-Path $turretSource $_ }
-& javac -cp $turretCp -d $turretOutput @sources (Join-Path $turretRepo 'tests/turret/BlueHiveTurretChecks.java')
+$sources += Join-Path $turretRepo 'TeamCode/src/main/java/org/firstinspires/ftc/teamcode/localization/InitializePinpoint.java'
+$sources += Join-Path $turretRepo 'TeamCode/src/main/java/org/firstinspires/ftc/teamcode/pedroPathing/LatestPose.java'
+& javac -cp $turretCp -d $turretOutput @sources (Join-Path $turretRepo 'tests/turret/BlueHiveTurretChecks.java') (Join-Path $turretRepo 'tests/turret/OdometryTargetChecks.java')
 if ($LASTEXITCODE -ne 0) { throw 'Turret checks compilation failed' }
 & java -cp ($turretCp + [IO.Path]::PathSeparator + $turretOutput) org.firstinspires.ftc.teamcode.turret.BlueHiveTurretChecks
 if ($LASTEXITCODE -ne 0) { throw 'Turret checks failed' }
+
+& java -cp ($turretCp + [IO.Path]::PathSeparator + $turretOutput) org.firstinspires.ftc.teamcode.turret.OdometryTargetChecks
+if ($LASTEXITCODE -ne 0) { throw 'Odometry checks failed' }

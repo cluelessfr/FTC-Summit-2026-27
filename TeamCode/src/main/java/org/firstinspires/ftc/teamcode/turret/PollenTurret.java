@@ -6,6 +6,11 @@ import com.qualcomm.hardware.limelightvision.Limelight3A;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 
 import org.firstinspires.ftc.robotcore.external.Telemetry;
+import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
+import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
+import org.firstinspires.ftc.robotcore.external.navigation.Pose2D;
+import org.firstinspires.ftc.teamcode.localization.InitializePinpoint;
+import org.firstinspires.ftc.teamcode.turret.HiveOpeningAim.Alliance;
 import org.firstinspires.ftc.teamcode.turret.HiveOpeningAim.CameraMount;
 import org.firstinspires.ftc.teamcode.turret.HiveOpeningAim.OpeningAim;
 import org.firstinspires.ftc.teamcode.turret.HiveOpeningAim.Vector;
@@ -14,7 +19,7 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Aims POLLEN at the upward blue BIOBUZZ CELL and provides both launcher bearings.
+ * Aims POLLEN at the upward BIOBUZZ CELL and provides both launcher bearings.
  *
  * Standalone subsystem, NOT an OpMode. Call start(), update(), addTelemetry(),
  * and stop() from the eventual TeleOp.
@@ -24,15 +29,20 @@ import java.util.Locale;
  * ONLY when the turret's actual geared travel includes that angle.
  * A positional servo cannot rotate through its mechanical end stops.
  *
- * No encoder is used: all turret angles are estimates from servo commands.
+ * No turret encoder is used: all turret angles are estimates from servo commands.
+ * When optional odometry is supplied, the latest detected opening is anchored
+ * in the robot odometry frame and used while the tag is out of view.
+ * Note: a moving HIVE can invalidate a remembered opening. Clear on a flip.
  * Set the external gearing ratio, direction and home alignment correctly.
  */
 public final class PollenTurret {
 
     public enum TargetCell {
-        ANY_BLUE,               // IDs 38-45
-        AUDIENCE_SIDE,          // IDs 38-41
-        OPPOSITE_AUDIENCE_SIDE  // IDs 42-45
+        ANY_CELL,
+        AUDIENCE_SIDE,
+        OPPOSITE_AUDIENCE_SIDE,
+        /** @deprecated Use ANY_CELL. */
+        @Deprecated ANY_BLUE
     }
 
     private static final String SERVO_NAME = "pollenTurret";
@@ -62,6 +72,7 @@ public final class PollenTurret {
             new Vector(LENS_FORWARD_METERS, LENS_LEFT_METERS, LENS_UP_METERS),
             Math.toRadians(CAMERA_YAW_DEGREES), Math.toRadians(CAMERA_PITCH_UP_DEGREES),
             Math.toRadians(CAMERA_ROLL_DEGREES));
+    // With odometry: pivot from the Pinpoint robot reference, forward/left/up meters.
     private static final Vector POLLEN_AXIS_ORIGIN = new Vector(0, 0, 0);
 
     private static final double TRACKING_KP = 0.45;
@@ -69,6 +80,8 @@ public final class PollenTurret {
     private static final double MAX_TURRET_CORRECTION_DEGREES = 10.0;
     private static final double MAX_SERVO_SPEED_DEGREES_PER_SEC = 240.0;
     private static final double TAG_LOST_TIMEOUT_SECONDS = 0.40;
+    // The HIVE can flip. Do not trust a remembered opening indefinitely.
+    private static final double DEFAULT_ODOMETRY_TARGET_MAX_AGE_SECONDS = 10.0;
     private static final long MAX_FRAME_STALENESS_MS = 120;
     private static final long POLLEN_SETTLE_MS = 250;
     private static final long HOME_SETTLE_MS = 1000;
@@ -88,19 +101,26 @@ public final class PollenTurret {
     private final TurretServo.Calibration calibration;
     private final Limelight3A limelight;
     private final int aprilTagPipeline;
+    private final Alliance alliance;
+    private final InitializePinpoint pinpoint; // null keeps the original AprilTag-only behavior
+    private final OdometryTargetTracker targetTracker = new OdometryTargetTracker();
+    private OdometryTargetTracker.Pose latestOdometryPose;
+    private double odometryTargetMaxAgeSeconds = DEFAULT_ODOMETRY_TARGET_MAX_AGE_SECONDS;
+    private boolean odometryAiming = false;
+    private long odometryFrameId;
 
     private CameraMount cameraMount;
     private Vector pollenAxis;
     private Vector nectarAxis;
     private OpeningAim openingAim;
-    private long pollenSettlesAtNanos;
-    private TargetCell targetCell = TargetCell.ANY_BLUE;
+    private long servoSettledAtNanos;
+    private TargetCell targetCell = TargetCell.ANY_CELL;
     private boolean started = false;
     private double commandedServoPosition;
     private double targetServoPosition;
     private double lastFrameTimestamp = Double.NaN;
     private long lastUpdateNanos = 0L;
-    private long lastSeenNanos = 0L;
+    private long lastAcceptedTagNanos = 0L;
     private int trackedTagId = -1;
     private double txDegrees = Double.NaN;
     private String trackingStatus = "NOT STARTED";
@@ -112,21 +132,47 @@ public final class PollenTurret {
     private int wrapTagId = -1;
     private double wrapTargetAngleDegrees = Double.NaN;
 
+    /** AprilTag-only aiming with the default pipeline and calibration. */
     public PollenTurret(HardwareMap hardwareMap) {
-        this(hardwareMap, DEFAULT_APRILTAG_PIPELINE);
+        this(hardwareMap, DEFAULT_APRILTAG_PIPELINE, DEFAULT_CALIBRATION, null);
     }
 
-    public PollenTurret(HardwareMap hardwareMap, int aprilTagPipeline) {
-        this(hardwareMap, aprilTagPipeline, DEFAULT_CALIBRATION);
+    /** Pass the same InitializePinpoint instance as FieldCentricDrive, or null.
+     * The OpMode updates it once before updating drive and turret. */
+    public PollenTurret(HardwareMap hardwareMap, InitializePinpoint pinpoint) {
+        this(hardwareMap, DEFAULT_APRILTAG_PIPELINE, DEFAULT_CALIBRATION, pinpoint);
+    }
+
+    /** Choose a pipeline with optional Pinpoint and the default servo calibration. */
+    public PollenTurret(HardwareMap hardwareMap, int aprilTagPipeline,
+                        InitializePinpoint pinpoint) {
+        this(hardwareMap, aprilTagPipeline, DEFAULT_CALIBRATION, pinpoint);
+    }
+
+    /** All setup is performed here; null Pinpoint selects AprilTag-only aiming. */
+    public PollenTurret(HardwareMap hardwareMap, int aprilTagPipeline,
+                        TurretServo.Calibration calibration, InitializePinpoint pinpoint) {
+        this(hardwareMap, aprilTagPipeline, calibration, pinpoint, Alliance.BLUE);
+    }
+
+    /** Select the alliance with the default pipeline and calibration. Pinpoint may be null. */
+    public PollenTurret(HardwareMap hardwareMap, InitializePinpoint pinpoint, Alliance alliance) {
+        this(hardwareMap, DEFAULT_APRILTAG_PIPELINE, DEFAULT_CALIBRATION, pinpoint, alliance);
     }
 
     public PollenTurret(HardwareMap hardwareMap, int aprilTagPipeline,
-                        TurretServo.Calibration calibration) {
+                        TurretServo.Calibration calibration, InitializePinpoint pinpoint,
+                        Alliance alliance) {
+        if (alliance == null) {
+            throw new IllegalArgumentException("Select a turret alliance.");
+        }
+        this.alliance = alliance;
         if (aprilTagPipeline < 0 || calibration == null) {
             throw new IllegalArgumentException("Set a valid pipeline and POLLEN calibration.");
         }
         this.aprilTagPipeline = aprilTagPipeline;
         this.calibration = calibration;
+        this.pinpoint = pinpoint;
         commandedServoPosition = calibration.home;
         targetServoPosition = calibration.home;
         servo = new TurretServo(hardwareMap, SERVO_NAME);
@@ -135,6 +181,11 @@ public final class PollenTurret {
             // POLLEN-only aiming uses the POLLEN pivot as the origin for both bearings.
             configureOpeningAim(DEFAULT_CAMERA_MOUNT, POLLEN_AXIS_ORIGIN, POLLEN_AXIS_ORIGIN);
         }
+    }
+
+    /** Set the POLLEN pivot relative to the localizer robot origin, in meters. */
+    public void configurePollenAxis(Vector axis) {
+        configureOpeningAim(cameraMount, axis, axis);
     }
 
     public static boolean hasDefaultCameraMeasurements() {
@@ -170,11 +221,12 @@ public final class PollenTurret {
         targetServoPosition = calibration.home;
         lastFrameTimestamp = Double.NaN;
         lastUpdateNanos = System.nanoTime();
-        pollenSettlesAtNanos = lastUpdateNanos + HOME_SETTLE_MS * 1_000_000L;
-        lastSeenNanos = 0L;
-        openingAim = null;
-        trackedTagId = -1;
-        txDegrees = Double.NaN;
+        servoSettledAtNanos = lastUpdateNanos + HOME_SETTLE_MS * 1_000_000L;
+        clearTarget();
+        targetTracker.clear();
+        latestOdometryPose = null;
+        odometryFrameId = pinpoint == null ? 0 : pinpoint.getPoseFrameId();
+        odometryAiming = false;
         resetWrap();
         trackingStatus = "SEARCHING";
         wrapFailedNanos = 0L;
@@ -190,24 +242,65 @@ public final class PollenTurret {
         }
 
         long now = System.nanoTime();
-        double dt = Math.min(0.10, Math.max(0.0,
+        double elapsedSeconds = Math.min(0.10, Math.max(0.0,
                 (now - lastUpdateNanos) / 1_000_000_000.0));
         lastUpdateNanos = now;
 
-        LLResult result = limelight.getLatestResult();
+        // TeleOp updates the shared odometry device BEFORE this method. We only
+        // read its latest pose, so two subsystems never call pinpoint.update().
+        long currentFrameId = pinpoint == null ? 0 : pinpoint.getPoseFrameId();
+        if (currentFrameId != odometryFrameId) {
+            clearOdometryTarget();
+            odometryFrameId = currentFrameId;
+        }
+        latestOdometryPose = readOdometryPose();
+        if (latestOdometryPose != null) targetTracker.addPose(now, latestOdometryPose);
 
-        // Avoid interfering with later classifiers or other Limelight pipelines.
-        if (result != null && result.getPipelineIndex() != aprilTagPipeline) {
+        LLResult result = limelight.getLatestResult();
+        boolean differentPipelineActive = result != null && result.getPipelineIndex() != aprilTagPipeline;
+        boolean acceptedTagFrame = !differentPipelineActive && processFrame(result, now);
+
+        // Also operates if another subsystem temporarily selects a non-tag pipeline.
+        odometryAiming = false;
+        if (!acceptedTagFrame && pinpoint != null) {
+            OpeningAim predicted = targetTracker.fallback(latestOdometryPose,
+                    pollenAxis, nectarAxis, now, odometryTargetMaxAgeSeconds);
+            if (predicted != null) {
+                odometryAiming = true;
+                if (!wrapping) {
+                    aimAtOpening(predicted, now, false);
+                    if (differentPipelineActive) trackingStatus = "ODOMETRY (OTHER PIPELINE)";
+                } else {
+                    // Keep the planned wrap route, but report updated robot-relative
+                    // bearings from odometry even while the tag is still unseen.
+                    openingAim = predicted;
+                    trackedTagId = predicted.tagId;
+                }
+            }
+        }
+        if (differentPipelineActive && !odometryAiming) {
             resetWrap();
             targetServoPosition = commandedServoPosition;
-            lastSeenNanos = 0L;
-            openingAim = null;
-            trackedTagId = -1;
-            txDegrees = Double.NaN;
+            clearTarget();
             trackingStatus = "OTHER PIPELINE ACTIVE";
-            return;
+        } else {
+            updateTrackingTimeouts(now);
         }
+        moveServo(now, elapsedSeconds);
+    }
 
+    private OdometryTargetTracker.Pose readOdometryPose() {
+        if (pinpoint == null) return null;
+        Pose2D robotPose = pinpoint.getPose();
+        if (robotPose == null) return null;
+        OdometryTargetTracker.Pose pose = new OdometryTargetTracker.Pose(
+                robotPose.getX(DistanceUnit.METER),
+                robotPose.getY(DistanceUnit.METER),
+                robotPose.getHeading(AngleUnit.RADIANS));
+        return pose.valid() ? pose : null;
+    }
+
+    private boolean processFrame(LLResult result, long now) {
         long frameAgeMs = result == null ? -1 : result.getStaleness();
         boolean freshFrame = frameAgeMs >= 0 && frameAgeMs <= MAX_FRAME_STALENESS_MS
                 && Double.isFinite(result.getTimestamp())
@@ -218,15 +311,22 @@ public final class PollenTurret {
             double delayMs = frameAgeMs + result.getCaptureLatency() + result.getTargetingLatency();
             // The camera moves with POLLEN. Use only exposures taken after the last
             // command settled, so its commanded yaw is also the yaw at capture.
-            if (Double.isFinite(delayMs) && delayMs >= 0
-                    && now - delayMs * 1_000_000 >= pollenSettlesAtNanos) {
-                if (!result.isValid() || !aimFromTags(result.getFiducialResults(), now)) {
+            if (Double.isFinite(delayMs) && delayMs >= 0) {
+                long captureTime = now - (long) (delayMs * 1_000_000.0);
+                if (captureTime >= servoSettledAtNanos) {
+                    OdometryTargetTracker.Pose capturePose = pinpoint == null
+                            ? null : targetTracker.poseAt(captureTime);
+                    if (result.isValid() && aimFromTags(
+                            result.getFiducialResults(), now, capturePose)) return true;
                     openingAim = null;
                     if (!wrapping) trackingStatus = "NO STABLE CELL OPENING";
                 }
             }
         }
+        return false;
+    }
 
+    private void updateTrackingTimeouts(long now) {
         if (wrapping) {
             // Never return home merely because the tag is out of the camera's
             // view during the chosen wrap-around route.
@@ -234,16 +334,24 @@ public final class PollenTurret {
                     <= WRAP_ARRIVAL_SERVO_TOLERANCE && wrapArrivedNanos == 0L) {
                 wrapArrivedNanos = now;
             }
+            // With a valid memorized field target, re-aim using the new odometry
+            // position on the next loop instead of requiring tag reacquisition.
+            if (wrapArrivedNanos != 0L && pinpoint != null
+                    && latestOdometryPose != null
+                    && targetTracker.hasTarget(now, odometryTargetMaxAgeSeconds)) {
+                resetWrap();
+                trackingStatus = "WRAP COMPLETE - ODOMETRY";
+                return;
+            }
 
             boolean timedOut = now - wrapStartedNanos >= secondsToNanos(WRAP_MAX_SECONDS);
             boolean failedToReacquire = wrapArrivedNanos != 0L &&
                     now - wrapArrivedNanos >= secondsToNanos(WRAP_REACQUIRE_WAIT_SECONDS);
             if (timedOut || failedToReacquire) {
                 resetWrap();
-                lastSeenNanos = 0L;
-                openingAim = null;
-                trackedTagId = -1;
-                txDegrees = Double.NaN;
+                clearTarget();
+                targetTracker.clearTarget(); // avoid repeating an impossible blind wrap
+                odometryAiming = false;
                 targetServoPosition = calibration.home;
                 trackingStatus = "WRAP FAILED - RETURNING HOME";
                 wrapFailedNanos = now;
@@ -252,12 +360,9 @@ public final class PollenTurret {
                         ? "WRAPPED - REACQUIRING TAG" : "WRAPPING INSIDE LIMITS";
             }
         } else {
-            boolean recentlySeen = lastSeenNanos != 0L &&
-                    now - lastSeenNanos < secondsToNanos(TAG_LOST_TIMEOUT_SECONDS);
-            if (!recentlySeen && now >= pollenSettlesAtNanos + MAX_FRAME_STALENESS_MS * 1_000_000L) {
-                trackedTagId = -1;
-                txDegrees = Double.NaN;
-                openingAim = null;
+            if (!odometryAiming && !hasRecentTarget(now)
+                    && now >= servoSettledAtNanos + MAX_FRAME_STALENESS_MS * 1_000_000L) {
+                clearTarget();
                 targetServoPosition = calibration.home;
                 boolean atHome = Math.abs(commandedServoPosition - calibration.home) < 0.005;
                 if (wrapFailedNanos != 0L
@@ -268,35 +373,35 @@ public final class PollenTurret {
                 }
             }
         }
+    }
 
-        double maxStep = MAX_SERVO_SPEED_DEGREES_PER_SEC * dt / calibration.travelDegrees;
+    private void moveServo(long now, double elapsedSeconds) {
+        double maxStep = MAX_SERVO_SPEED_DEGREES_PER_SEC * elapsedSeconds / calibration.travelDegrees;
         double nextPosition = TurretServo.moveTowards(commandedServoPosition,
                 calibration.limit(targetServoPosition), maxStep);
         if (nextPosition != commandedServoPosition) {
             commandedServoPosition = nextPosition;
             servo.setPosition(commandedServoPosition);
-            pollenSettlesAtNanos = now + POLLEN_SETTLE_MS * 1_000_000L;
+            servoSettledAtNanos = now + POLLEN_SETTLE_MS * 1_000_000L;
         }
     }
 
-    private void aimAtOpening(OpeningAim aim, long now) {
+    private void aimAtOpening(OpeningAim aim, long now, boolean fromAprilTag) {
         trackedTagId = aim.tagId;
         openingAim = aim;
-        lastSeenNanos = now;
+        if (fromAprilTag) lastAcceptedTagNanos = now;
 
         double currentTurretAngle = calibration.rightDegrees(commandedServoPosition);
         double errorDegrees = openingErrorDegrees(aim.pollenYaw, currentTurretAngle);
         if (Math.abs(errorDegrees) <= AIM_TOLERANCE_DEGREES) {
             targetServoPosition = commandedServoPosition;
-            trackingStatus = "ALIGNED";
+            trackingStatus = fromAprilTag ? "ALIGNED" : "ODOMETRY ALIGNED";
             return;
         }
 
         double desiredTurretAngle = currentTurretAngle + errorDegrees;
-        double endA = calibration.rightDegrees(calibration.min);
-        double endB = calibration.rightDegrees(calibration.max);
-        double minAngle = Math.min(endA, endB);
-        double maxAngle = Math.max(endA, endB);
+        double minAngle = calibration.minRightDegrees;
+        double maxAngle = calibration.maxRightDegrees;
 
         // Only take the long way around when the direct target is OUT of bounds.
         // This handles cases such as +200 degrees being equivalent to -160.
@@ -313,24 +418,28 @@ public final class PollenTurret {
                 wrapTagId = trackedTagId;
                 wrapTargetAngleDegrees = alternateAngle;
                 targetServoPosition = calibration.limit(calibration.position(alternateAngle));
-                trackingStatus = "WRAPPING INSIDE LIMITS";
+                trackingStatus = fromAprilTag
+                        ? "WRAPPING INSIDE LIMITS" : "ODOMETRY WRAPPING INSIDE LIMITS";
                 return;
             }
 
             // Neither the direct angle nor a 360-degree equivalent is reachable.
             // Move toward the nearest possible boundary without exceeding it.
             double safeAngle = clip(desiredTurretAngle, minAngle, maxAngle);
-            double correction = clip(TRACKING_KP * (safeAngle - currentTurretAngle),
-                    -MAX_TURRET_CORRECTION_DEGREES, MAX_TURRET_CORRECTION_DEGREES);
-            targetServoPosition = calibration.limit(calibration.position(currentTurretAngle + correction));
-            trackingStatus = "TARGET OUT OF REACH";
+            setCorrectionTarget(currentTurretAngle, safeAngle - currentTurretAngle);
+            trackingStatus = fromAprilTag ? "TARGET OUT OF REACH"
+                    : "ODOMETRY TARGET OUT OF REACH";
             return;
         }
 
-        double correctionDegrees = clip(TRACKING_KP * errorDegrees,
+        setCorrectionTarget(currentTurretAngle, errorDegrees);
+        trackingStatus = fromAprilTag ? "TRACKING" : "ODOMETRY FALLBACK";
+    }
+
+    private void setCorrectionTarget(double currentRightDegrees, double errorDegrees) {
+        double correction = clip(TRACKING_KP * errorDegrees,
                 -MAX_TURRET_CORRECTION_DEGREES, MAX_TURRET_CORRECTION_DEGREES);
-        targetServoPosition = calibration.limit(calibration.position(currentTurretAngle + correctionDegrees));
-        trackingStatus = "TRACKING";
+        targetServoPosition = calibration.limit(calibration.position(currentRightDegrees + correction));
     }
 
     static double openingErrorDegrees(double openingYawRadians, double currentRightDegrees) {
@@ -339,7 +448,7 @@ public final class PollenTurret {
                 FULL_TURN_DEGREES);
     }
 
-    /** Optional: restrict tracking to one of the two blue cells. */
+    /** Optional: restrict tracking to one of the two cells for the selected alliance. */
     public void setTargetCell(TargetCell cell) {
         if (cell == null) {
             throw new IllegalArgumentException("Target cell cannot be null.");
@@ -347,15 +456,40 @@ public final class PollenTurret {
         targetCell = cell;
         resetWrap();
         targetServoPosition = commandedServoPosition;
-        trackedTagId = -1;
-        txDegrees = Double.NaN;
-        lastSeenNanos = 0L;
-        openingAim = null;
+        clearTarget();
+        targetTracker.clear();
+        odometryAiming = false;
     }
 
+    /** Explicitly invalidate the cached point when the HIVE flips or pose resets. */
+    public void clearOdometryTarget() {
+        targetTracker.clear();
+        odometryAiming = false;
+        clearTarget();
+        resetWrap();
+        targetServoPosition = calibration.home;
+    }
+
+    /** How long a stored opening can be used without another valid AprilTag. */
+    public void setOdometryTargetMaxAgeSeconds(double seconds) {
+        if (!Double.isFinite(seconds) || seconds <= 0)
+            throw new IllegalArgumentException("Odometry cache age must be positive and finite.");
+        odometryTargetMaxAgeSeconds = seconds;
+    }
+
+    public Vector getRememberedFieldOpening() {
+        return targetTracker.hasTarget(System.nanoTime(), odometryTargetMaxAgeSeconds)
+                ? targetTracker.getFieldOpening() : null;
+    }
+
+    public boolean isOdometryAiming() { return odometryAiming; }
+
     public boolean hasRecentBlueTag() {
-        return started && lastSeenNanos != 0L &&
-                System.nanoTime() - lastSeenNanos < secondsToNanos(TAG_LOST_TIMEOUT_SECONDS);
+        return alliance == Alliance.BLUE && hasRecentAllianceTag();
+    }
+
+    public boolean hasRecentAllianceTag() {
+        return started && hasRecentTarget(System.nanoTime());
     }
 
     public int getTrackedTagId() {
@@ -364,19 +498,36 @@ public final class PollenTurret {
 
     /** Latest usable target and both bearings, with positive yaw pointing left. */
     public OpeningAim getOpeningAim() {
-        return hasRecentBlueTag() ? openingAim : null;
+        return (hasRecentAllianceTag() || odometryAiming) ? openingAim : null;
     }
 
     public void addInitializationTelemetry(Telemetry telemetry) {
-        telemetry.addLine("Blue AprilTag turret: aims at the upward CELL opening.");
+        telemetry.addLine("AprilTag turret: aims at the upward CELL opening.");
         telemetry.addLine("Check camera mount, turret axes, servo calibration, and 3D pipeline.");
         addTelemetry(telemetry);
     }
 
     public void addTelemetry(Telemetry telemetry) {
         telemetry.addData("Turret status", trackingStatus);
-        telemetry.addData("Blue cell", targetCell);
+        telemetry.addData("Alliance", alliance);
+        telemetry.addData("Target cell", targetCell);
         telemetry.addData("AprilTag pipeline", aprilTagPipeline);
+        telemetry.addData("Odometry enabled", pinpoint != null);
+        telemetry.addData("Odometry aim active", odometryAiming);
+        telemetry.addData("Odometry pose valid", latestOdometryPose != null);
+        if (pinpoint != null && latestOdometryPose != null) {
+            telemetry.addData("Odometry robot X/Y (m)", "%.3f / %.3f",
+                    latestOdometryPose.x, latestOdometryPose.y);
+            telemetry.addData("Odometry heading (deg)", "%.1f",
+                    Math.toDegrees(latestOdometryPose.heading));
+        }
+        Vector remembered = getRememberedFieldOpening();
+        if (remembered != null) {
+            telemetry.addData("Remembered CELL field X/Y/Z (m)", "%.3f / %.3f / %.3f",
+                    remembered.x, remembered.y, remembered.z);
+            telemetry.addData("Remembered CELL age (s)", "%.2f",
+                    targetTracker.ageSeconds(System.nanoTime()));
+        }
         telemetry.addData("Locked tag", trackedTagId < 0 ? "none" : trackedTagId);
         telemetry.addData("AprilTag tx (deg)",
                 Double.isFinite(txDegrees) ? String.format(Locale.US, "%.2f", txDegrees) : "--");
@@ -408,9 +559,22 @@ public final class PollenTurret {
     public void stop() {
         started = false;
         openingAim = null;
+        targetTracker.clear();
+        odometryAiming = false;
         resetWrap();
         trackingStatus = "STOPPED";
         limelight.stop();
+    }
+
+    private boolean hasRecentTarget(long now) {
+        return lastAcceptedTagNanos != 0L && now - lastAcceptedTagNanos < secondsToNanos(TAG_LOST_TIMEOUT_SECONDS);
+    }
+
+    private void clearTarget() {
+        lastAcceptedTagNanos = 0L;
+        openingAim = null;
+        trackedTagId = -1;
+        txDegrees = Double.NaN;
     }
 
     private void resetWrap() {
@@ -421,7 +585,8 @@ public final class PollenTurret {
         wrapTargetAngleDegrees = Double.NaN;
     }
 
-    private boolean aimFromTags(List<LLResultTypes.FiducialResult> tags, long now) {
+    private boolean aimFromTags(List<LLResultTypes.FiducialResult> tags, long now,
+                                OdometryTargetTracker.Pose capturePose) {
         if (tags == null || (wrapping && wrapArrivedNanos == 0L)) return false;
         double pollenYaw = Math.toRadians(-calibration.rightDegrees(commandedServoPosition));
         OpeningAim best = null;
@@ -429,7 +594,7 @@ public final class PollenTurret {
         for (LLResultTypes.FiducialResult tag : tags) {
             if (tag == null || !isAllowedTag(tag.getFiducialId())) continue;
             if (wrapping && tag.getFiducialId() != wrapTagId) continue;
-            OpeningAim aim = HiveOpeningAim.estimateOpening(HiveOpeningAim.Alliance.BLUE,
+            OpeningAim aim = HiveOpeningAim.estimateOpening(alliance,
                     tag, cameraMount, pollenYaw, pollenAxis, nectarAxis);
             if (aim == null || !Double.isFinite(aim.pollenYaw) || !Double.isFinite(aim.nectarYaw)) {
                 continue;
@@ -442,20 +607,30 @@ public final class PollenTurret {
             if (tag.getFiducialId() == trackedTagId) break;
         }
         if (best == null) return false;
+        if (pinpoint != null && latestOdometryPose != null && capturePose == null) return false;
         if (wrapping) resetWrap();
         txDegrees = bestTag.getTargetXDegrees();
-        aimAtOpening(best, now);
+        // Cache an observation in the odometry field frame *at image exposure*.
+        // With no pinpoint, tracking behaves exactly as before.
+        if (pinpoint != null && capturePose != null) {
+            targetTracker.observe(best, capturePose, now);
+            // Aim from the current robot pose, not the older camera exposure pose.
+            OpeningAim currentAim = targetTracker.fallback(latestOdometryPose,
+                    pollenAxis, nectarAxis, now, odometryTargetMaxAgeSeconds);
+            if (currentAim != null) best = currentAim;
+        }
+        aimAtOpening(best, now, true);
         return true;
     }
 
     private boolean isAllowedTag(int id) {
-        HiveOpeningAim.Alliance alliance = HiveOpeningAim.Alliance.BLUE;
         if (!alliance.accepts(id)) return false;
         switch (targetCell) {
             case AUDIENCE_SIDE:
                 return alliance.isAudienceTag(id);
             case OPPOSITE_AUDIENCE_SIDE:
                 return !alliance.isAudienceTag(id);
+            case ANY_CELL:
             case ANY_BLUE:
             default:
                 return true;

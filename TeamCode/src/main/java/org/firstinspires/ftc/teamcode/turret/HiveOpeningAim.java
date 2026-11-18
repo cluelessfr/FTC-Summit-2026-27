@@ -110,6 +110,18 @@ public final class HiveOpeningAim {
         }
     }
 
+    /** Reconstructs bearings from the odometry-predicted opening position. */
+    static OpeningAim fromRememberedOpening(int tagId, boolean audienceCellUp,
+                                             Vector robotRelativeOpening,
+                                             Vector pollenAxis, Vector nectarAxis) {
+        if (robotRelativeOpening == null || !robotRelativeOpening.isFinite()
+                || pollenAxis == null || nectarAxis == null
+                || !pollenAxis.isFinite() || !nectarAxis.isFinite()) return null;
+        OpeningAim aim = new OpeningAim(tagId, audienceCellUp,
+                robotRelativeOpening, pollenAxis, nectarAxis);
+        return Double.isFinite(aim.pollenYaw) && Double.isFinite(aim.nectarYaw) ? aim : null;
+    }
+
     /** Uses the FTC SDK camera-space pose without Limelight map POI offsets. */
     public static OpeningAim estimateOpening(Alliance alliance, LLResultTypes.FiducialResult tag,
                                              CameraMount mount, double pollenYawAtCapture,
@@ -117,11 +129,11 @@ public final class HiveOpeningAim {
         if (tag == null || !alliance.accepts(tag.getFiducialId())) return null;
         Pose3D pose = tag.getTargetPoseCameraSpace();
         if (pose == null || pose.getPosition() == null || pose.getOrientation() == null) return null;
-        Position p = pose.getPosition().toUnit(DistanceUnit.METER);
-        YawPitchRollAngles r = pose.getOrientation();
-        return estimateOpening(alliance, tag.getFiducialId(), new Vector(p.x, p.y, p.z),
-                r.getYaw(AngleUnit.RADIANS), r.getPitch(AngleUnit.RADIANS),
-                r.getRoll(AngleUnit.RADIANS), mount, pollenYawAtCapture, pollenAxis, nectarAxis);
+        Position tagPosition = pose.getPosition().toUnit(DistanceUnit.METER);
+        YawPitchRollAngles tagOrientation = pose.getOrientation();
+        return estimateOpening(alliance, tag.getFiducialId(), new Vector(tagPosition.x, tagPosition.y, tagPosition.z),
+                tagOrientation.getYaw(AngleUnit.RADIANS), tagOrientation.getPitch(AngleUnit.RADIANS),
+                tagOrientation.getRoll(AngleUnit.RADIANS), mount, pollenYawAtCapture, pollenAxis, nectarAxis);
     }
 
     static OpeningAim estimateOpening(Alliance alliance, int id, Vector tag,
@@ -133,23 +145,22 @@ public final class HiveOpeningAim {
         // The measured table uses right/down/outward, so -0.146 m becomes +0.146 m.
         Vector down = new Vector(0, 1, 0).rotate(yaw, pitch, roll);
         Vector inward = new Vector(0, 0, 1).rotate(yaw, pitch, roll);
-        Vector downAtHome = mount.directionAtHome(down);
-        Vector inwardAtHome = mount.directionAtHome(inward);
+        double inwardUpComponent = mount.directionAtHome(inward).z;
         // A stable CELL's printed-down axis points toward its opening (about +/-30 degrees).
         // Reject intermediate poses and solutions inconsistent with an underside tag.
-        double slope = downAtHome.z;
-        if (!(Math.abs(slope) >= 0.25 && Math.abs(slope) <= 0.75
-                && inwardAtHome.z >= 0.60 && inward.dot(tag) > 0)) return null;
+        double printedDownUpComponent = mount.directionAtHome(down).z;
+        if (!(Math.abs(printedDownUpComponent) >= 0.25 && Math.abs(printedDownUpComponent) <= 0.75
+                && inwardUpComponent >= 0.60 && inward.dot(tag) > 0)) return null;
 
-        boolean taggedCellUp = slope > 0;
+        boolean taggedCellUp = printedDownUpComponent > 0;
         // Printed-down points out of this CELL and into the opposite CELL.
-        double aimY = taggedCellUp ? SAME_CELL_OFFSET_Y_METERS - AIM_DEPTH_METERS
+        double openingOffsetY = taggedCellUp ? SAME_CELL_OFFSET_Y_METERS - AIM_DEPTH_METERS
                 : OTHER_CELL_OFFSET_Y_METERS + AIM_DEPTH_METERS;
         Vector offset = new Vector(TAG_OFFSET_X_METERS[(id - alliance.firstTag) % 4],
-                aimY, OFFSET_INTO_TAG_METERS);
+                openingOffsetY, OFFSET_INTO_TAG_METERS);
         Vector lensToOpening = tag.plus(offset.rotate(yaw, pitch, roll));
-        Vector opening = pollenAxis.plus(mount.lensFromPollenAxis
-                .plus(mount.directionAtHome(lensToOpening)).rotate(pollenYawAtCapture, 0, 0));
+        Vector pivotToOpeningAtHome = mount.lensFromPollenAxis.plus(mount.directionAtHome(lensToOpening));
+        Vector opening = pollenAxis.plus(pivotToOpeningAtHome.rotate(pollenYawAtCapture, 0, 0));
         if (!opening.isFinite()) return null;
         return new OpeningAim(id, alliance.isAudienceTag(id) == taggedCellUp,
                 opening, pollenAxis, nectarAxis);

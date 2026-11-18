@@ -6,12 +6,14 @@ import com.qualcomm.robotcore.hardware.HardwareMap;
 import org.firstinspires.ftc.robotcore.external.Telemetry;
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
+import org.firstinspires.ftc.robotcore.external.navigation.Pose2D;
 import org.firstinspires.ftc.teamcode.pedroPathing.LatestPose;
 
 public class InitializePinpoint {
 
     private final GoBildaPinpointDriver pinpoint;
     private final boolean autonomousPoseRestored;
+    private long poseFrameId;
     private static final String PINPOINT_NAME = "pinpoint";
     private static final DistanceUnit DISTANCE_UNIT = DistanceUnit.MM;
     private static final GoBildaPinpointDriver.GoBildaOdometryPods ENCODER_RESOLUTION = GoBildaPinpointDriver.GoBildaOdometryPods.goBILDA_SWINGARM_POD;
@@ -45,6 +47,13 @@ public class InitializePinpoint {
     public void update() {
         pinpoint.update();
     }
+
+    /** Cached pose only; the OpMode remains responsible for update(). */
+    public Pose2D getPose() {
+        return isReady() ? pinpoint.getPosition() : null;
+    }
+
+    public long getPoseFrameId() { return poseFrameId; }
 
     public double getXInches() {
         return pinpoint.getPosX(DistanceUnit.INCH);
@@ -80,6 +89,7 @@ public class InitializePinpoint {
 
     public void resetPositionAndIMU() {
         pinpoint.resetPosAndIMU();
+        poseFrameId++;
     }
 
     public void addTelemetry(Telemetry telemetry) {

@@ -10,6 +10,7 @@ public final class TurretServo {
     public static final class Calibration {
         final double home, min, max;
         final double travelDegrees, turretPerServoDegree, rightSign;
+        final double minRightDegrees, maxRightDegrees;
 
         /** Right sign is +1 when increasing servo position turns the turret right. */
         public Calibration(double home, double min, double max, double travelDegrees,
@@ -27,6 +28,10 @@ public final class TurretServo {
             this.travelDegrees = travelDegrees;
             this.turretPerServoDegree = turretPerServoDegree;
             this.rightSign = rightSign;
+            double angleAtMinPosition = rightDegrees(min);
+            double angleAtMaxPosition = rightDegrees(max);
+            minRightDegrees = Math.min(angleAtMinPosition, angleAtMaxPosition);
+            maxRightDegrees = Math.max(angleAtMinPosition, angleAtMaxPosition);
         }
 
         double rightDegrees(double position) {
@@ -37,15 +42,14 @@ public final class TurretServo {
             return home + rightSign * rightDegrees / (travelDegrees * turretPerServoDegree);
         }
 
-        double nearestReachableRightDegrees(double desired, double current) {
-            if (!Double.isFinite(desired)) return Double.NaN;
-            double low = Math.min(rightDegrees(min), rightDegrees(max));
-            double high = Math.max(rightDegrees(min), rightDegrees(max));
-            double first = Math.ceil((low - desired) / 360);
-            double last = Math.floor((high - desired) / 360);
-            if (first > last) return Double.NaN;
-            double turn = Math.max(first, Math.min(last, Math.round((current - desired) / 360)));
-            return desired + 360 * turn;
+        double nearestReachableRightDegrees(double desiredRightDegrees, double currentRightDegrees) {
+            if (!Double.isFinite(desiredRightDegrees)) return Double.NaN;
+            double firstReachableTurn = Math.ceil((minRightDegrees - desiredRightDegrees) / 360);
+            double lastReachableTurn = Math.floor((maxRightDegrees - desiredRightDegrees) / 360);
+            if (firstReachableTurn > lastReachableTurn) return Double.NaN;
+            long preferredTurn = Math.round((currentRightDegrees - desiredRightDegrees) / 360);
+            double nearestTurn = Math.max(firstReachableTurn, Math.min(lastReachableTurn, preferredTurn));
+            return desiredRightDegrees + 360 * nearestTurn;
         }
 
         double limit(double position) {
