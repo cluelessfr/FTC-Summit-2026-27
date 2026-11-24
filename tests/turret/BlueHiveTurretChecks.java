@@ -6,6 +6,7 @@ public final class BlueHiveTurretChecks {
 
     public static void main(String[] args) {
         aprilTagOpening();
+        cellSwitchConfirmation();
         System.out.println("PASS: " + checks + " AprilTag aim and calibration checks");
     }
 
@@ -55,6 +56,12 @@ public final class BlueHiveTurretChecks {
         check(HiveOpeningAim.estimateOpening(
                 HiveOpeningAim.Alliance.BLUE, 38, new HiveOpeningAim.Vector(0, 0, 2), 0, 0, Math.PI / 2,
                 mount, 0, pollen, nectar) == null, "neutral CELL produces no aim");
+        for (int tilt : new int[]{-40, -24, -15, 15, 24, 40}) {
+            check(HiveOpeningAim.estimateOpening(
+                    HiveOpeningAim.Alliance.BLUE, 38, new HiveOpeningAim.Vector(0, 0, 2),
+                    0, 0, Math.toRadians(90 - tilt), mount, 0, pollen, nectar) == null,
+                    "non-endpoint tilt " + tilt + " does not produce an aim");
+        }
         check(HiveOpeningAim.estimateOpening(
                 HiveOpeningAim.Alliance.BLUE, 37, new HiveOpeningAim.Vector(0, 0, 2), 0, 0, Math.PI / 3,
                 mount, 0, pollen, nectar) == null, "red tag ignored");
@@ -74,6 +81,33 @@ public final class BlueHiveTurretChecks {
             check(HiveOpeningAim.Alliance.BLUE.accepts(id) == (id >= 38 && id <= 45),
                     "blue acceptance for ID " + id);
         }
+    }
+
+    private static void cellSwitchConfirmation() {
+        PollenTurret.CellConfirmation confirmation = new PollenTurret.CellConfirmation();
+        long ms = 1_000_000;
+        check(confirmation.accept(false, 0, true), "first endpoint observation acquires");
+        check(!confirmation.accept(true, 40 * ms, true), "single opposite frame holds current CELL");
+        check(!confirmation.accept(true, 40 * ms, true), "duplicate exposure does not count");
+        check(!confirmation.accept(true, 160 * ms, true), "two exposures cannot confirm");
+        check(confirmation.accept(false, 200 * ms, true), "old side discards contrary evidence");
+        check(!confirmation.accept(true, 240 * ms, true), "new confirmation starts over");
+        confirmation.discardPending();
+        check(!confirmation.accept(true, 280 * ms, true), "missing or invalid frame clears pending evidence");
+        check(!confirmation.accept(true, 680 * ms, true), "a long gap starts a new confirmation");
+        check(!confirmation.accept(true, 720 * ms, true), "second endpoint exposure waits");
+        check(!confirmation.accept(true, 760 * ms, true), "short burst waits for the full dwell");
+        check(confirmation.accept(true, 800 * ms, true), "consistent endpoint exposures confirm the change");
+        check(confirmation.accept(true, 840 * ms, true), "same side tracks normally after confirmation");
+        check(!confirmation.accept(false, 880 * ms, true), "a change back also requires confirmation");
+        confirmation.clear();
+        check(confirmation.accept(false, 920 * ms, true), "explicit reset allows a new initial acquisition");
+        check(!confirmation.accept(true, 960 * ms, false), "moving camera supplies first side evidence");
+        check(!confirmation.accept(true, 1160 * ms, false), "moving camera supplies second side evidence");
+        check(!confirmation.accept(true, 1360 * ms, false), "agreement cannot commit an unsettled field pose");
+        check(confirmation.waitingForSettledPose(1360 * ms), "agreed change pauses the servo for a new exposure");
+        check(!confirmation.waitingForSettledPose(1911 * ms), "a missing camera result releases the pause");
+        check(confirmation.accept(false, 1920 * ms, true), "the original side remains committed until a safe pose");
     }
 
     private static void check(boolean condition, String message) {

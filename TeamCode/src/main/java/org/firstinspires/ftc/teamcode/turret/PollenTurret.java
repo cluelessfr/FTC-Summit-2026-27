@@ -80,11 +80,10 @@ public final class PollenTurret {
     private static final double MAX_TURRET_CORRECTION_DEGREES = 10.0;
     private static final double MAX_SERVO_SPEED_DEGREES_PER_SEC = 240.0;
     private static final double TAG_LOST_TIMEOUT_SECONDS = 0.80;
-    // The HIVE can flip. Do not trust a remembered opening indefinitely.
-    private static final double DEFAULT_ODOMETRY_TARGET_MAX_AGE_SECONDS = 10.0;
     private static final long MAX_FRAME_STALENESS_MS = 120;
     private static final long POLLEN_SETTLE_MS = 250;
     private static final long HOME_SETTLE_MS = 1000;
+    private static final long LIVE_VISION_DISPLAY_NANOS = 350_000_000L;
 
     // When a wrap-around path is selected, continue along it even after the
     // AprilTag leaves the camera view. Give it time to become visible again.
@@ -101,11 +100,13 @@ public final class PollenTurret {
     private final TurretServo.Calibration calibration;
     private final Limelight3A limelight;
     private final int aprilTagPipeline;
-    private final Alliance alliance;
+    private Alliance alliance;
     private final InitializePinpoint pinpoint; // null keeps the original AprilTag-only behavior
     private final OdometryTargetTracker targetTracker = new OdometryTargetTracker();
+    private final CellConfirmation cellConfirmation = new CellConfirmation();
     private OdometryTargetTracker.Pose latestOdometryPose;
-    private double odometryTargetMaxAgeSeconds = DEFAULT_ODOMETRY_TARGET_MAX_AGE_SECONDS;
+    // Losing sight of the HIVE does not change the last observed opening in the pose frame.
+    private double odometryTargetMaxAgeSeconds = Double.POSITIVE_INFINITY;
     private boolean odometryAiming = false;
     private long odometryFrameId;
 
@@ -258,6 +259,7 @@ public final class PollenTurret {
 
         LLResult result = limelight.getLatestResult();
         boolean differentPipelineActive = result != null && result.getPipelineIndex() != aprilTagPipeline;
+        if (differentPipelineActive) cellConfirmation.discardPending();
         boolean acceptedTagFrame = !differentPipelineActive && processFrame(result, now);
 
         // Also operates if another subsystem temporarily selects a non-tag pipeline.
@@ -286,7 +288,11 @@ public final class PollenTurret {
         } else {
             updateTrackingTimeouts(now);
         }
-        moveServo(now, elapsedSeconds);
+        if (!wrapping && cellConfirmation.waitingForSettledPose(now)) {
+            trackingStatus = "CONFIRMED CELL - WAITING FOR CAMERA";
+        } else {
+            moveServo(now, elapsedSeconds);
+        }
     }
 
     private OdometryTargetTracker.Pose readOdometryPose() {
@@ -313,15 +319,18 @@ public final class PollenTurret {
             // command settled, so its commanded yaw is also the yaw at capture.
             if (Double.isFinite(delayMs) && delayMs >= 0) {
                 long captureTime = now - (long) (delayMs * 1_000_000.0);
-                if (captureTime >= servoSettledAtNanos) {
-                    OdometryTargetTracker.Pose capturePose = pinpoint == null
+                boolean servoSettledForExposure = captureTime >= servoSettledAtNanos;
+                if (result.isValid()) {
+                    OdometryTargetTracker.Pose capturePose = pinpoint == null || !servoSettledForExposure
                             ? null : targetTracker.poseAt(captureTime);
-                    if (result.isValid() && aimFromTags(
-                            result.getFiducialResults(), now, capturePose)) return true;
-                    openingAim = null;
-                    if (!wrapping) trackingStatus = "NO STABLE CELL OPENING";
+                    if (aimFromTags(result.getFiducialResults(), now, captureTime,
+                            capturePose, servoSettledForExposure)) return true;
+                    if (!wrapping && servoSettledForExposure) trackingStatus = "NO STABLE CELL OPENING";
+                    return false;
                 }
+                if (!wrapping && servoSettledForExposure) trackingStatus = "NO STABLE CELL OPENING";
             }
+            cellConfirmation.discardPending();
         }
         return false;
     }
@@ -461,6 +470,14 @@ public final class PollenTurret {
         odometryAiming = false;
     }
 
+    /** Switch the target HIVE and discard the previous HIVE's lock and aim. */
+    public void toggleAlliance() {
+        alliance = alliance == Alliance.BLUE ? Alliance.RED : Alliance.BLUE;
+        clearOdometryTarget();
+        wrapFailedNanos = 0L;
+        if (started) trackingStatus = "SEARCHING";
+    }
+
     /** Explicitly invalidate the cached point when the HIVE flips or pose resets. */
     public void clearOdometryTarget() {
         targetTracker.clear();
@@ -470,10 +487,10 @@ public final class PollenTurret {
         targetServoPosition = calibration.home;
     }
 
-    /** How long a stored opening can be used without another valid AprilTag. */
+    /** Optional cache timeout in seconds. Positive infinity keeps the target until it is invalidated. */
     public void setOdometryTargetMaxAgeSeconds(double seconds) {
-        if (!Double.isFinite(seconds) || seconds <= 0)
-            throw new IllegalArgumentException("Odometry cache age must be positive and finite.");
+        if (!(seconds > 0))
+            throw new IllegalArgumentException("Odometry cache age must be positive.");
         odometryTargetMaxAgeSeconds = seconds;
     }
 
@@ -508,12 +525,15 @@ public final class PollenTurret {
     }
 
     public void addTelemetry(Telemetry telemetry) {
-        telemetry.addData("Turret status", trackingStatus);
+        boolean visionCurrent = lastAcceptedTagNanos != 0
+                && System.nanoTime() - lastAcceptedTagNanos <= LIVE_VISION_DISPLAY_NANOS
+                && !"ODOMETRY (OTHER PIPELINE)".equals(trackingStatus);
+        telemetry.addData("Turret status", visionCurrent ? visionStatus(trackingStatus) : trackingStatus);
         telemetry.addData("Alliance", alliance);
         telemetry.addData("Target cell", targetCell);
         telemetry.addData("AprilTag pipeline", aprilTagPipeline);
         telemetry.addData("Odometry enabled", pinpoint != null);
-        telemetry.addData("Odometry aim active", odometryAiming);
+        telemetry.addData("Odometry aim active", odometryAiming && !visionCurrent);
         telemetry.addData("Odometry pose valid", latestOdometryPose != null);
         if (pinpoint != null && latestOdometryPose != null) {
             telemetry.addData("Odometry robot X/Y (m)", "%.3f / %.3f",
@@ -555,6 +575,16 @@ public final class PollenTurret {
                         || commandedServoPosition >= calibration.max - 0.001);
     }
 
+    private static String visionStatus(String status) {
+        // A fresh result need not arrive on every OpMode iteration.
+        switch (status) {
+            case "ODOMETRY ALIGNED": return "ALIGNED";
+            case "ODOMETRY FALLBACK": return "TRACKING";
+            case "ODOMETRY TARGET OUT OF REACH": return "TARGET OUT OF REACH";
+            default: return status;
+        }
+    }
+
     /** Stops Limelight polling; leaves the turret in its last commanded position. */
     public void stop() {
         started = false;
@@ -571,6 +601,7 @@ public final class PollenTurret {
     }
 
     private void clearTarget() {
+        cellConfirmation.clear();
         lastAcceptedTagNanos = 0L;
         openingAim = null;
         trackedTagId = -1;
@@ -585,9 +616,12 @@ public final class PollenTurret {
         wrapTargetAngleDegrees = Double.NaN;
     }
 
-    private boolean aimFromTags(List<LLResultTypes.FiducialResult> tags, long now,
-                                OdometryTargetTracker.Pose capturePose) {
-        if (tags == null || (wrapping && wrapArrivedNanos == 0L)) return false;
+    private boolean aimFromTags(List<LLResultTypes.FiducialResult> tags, long now, long captureTime,
+                                OdometryTargetTracker.Pose capturePose, boolean servoSettledForExposure) {
+        if (tags == null || (wrapping && wrapArrivedNanos == 0L)) {
+            cellConfirmation.discardPending();
+            return false;
+        }
         double pollenYaw = Math.toRadians(-calibration.rightDegrees(commandedServoPosition));
         OpeningAim best = null;
         LLResultTypes.FiducialResult bestTag = null;
@@ -606,8 +640,13 @@ public final class PollenTurret {
             }
             if (tag.getFiducialId() == trackedTagId) break;
         }
-        if (best == null) return false;
-        if (pinpoint != null && latestOdometryPose != null && capturePose == null) return false;
+        if (best == null || (servoSettledForExposure && latestOdometryPose != null && capturePose == null)) {
+            cellConfirmation.discardPending();
+            return false;
+        }
+        // The CELL side follows the tag's vertical orientation, which is independent
+        // of turret yaw. Its field position still needs a settled camera angle.
+        if (!cellConfirmation.accept(best.audienceCellUp, captureTime, servoSettledForExposure)) return false;
         if (wrapping) resetWrap();
         txDegrees = bestTag.getTargetXDegrees();
         // Cache an observation in the odometry field frame *at image exposure*.
@@ -634,6 +673,55 @@ public final class PollenTurret {
             case ANY_BLUE:
             default:
                 return true;
+        }
+    }
+
+    /** Confirms a change of CELL using distinct endpoint exposures, even if the tag ID stays the same. */
+    static final class CellConfirmation {
+        private static final long CONFIRM_NANOS = 120_000_000L;
+        // Require agreement even when the camera produces fewer frames under load.
+        private static final long MAX_GAP_NANOS = 350_000_000L;
+        private static final long MAX_SETTLE_EVIDENCE_AGE_NANOS = 550_000_000L;
+        private Boolean acceptedSide;
+        private int pendingFrames;
+        private long firstExposure, lastExposure;
+
+        boolean accept(boolean audienceUp, long exposure, boolean settled) {
+            if (acceptedSide == null || acceptedSide == audienceUp) {
+                discardPending();
+                if (settled) acceptedSide = audienceUp;
+                return settled;
+            }
+            if (pendingFrames == 0 || exposure < lastExposure || exposure - lastExposure > MAX_GAP_NANOS) {
+                pendingFrames = 1;
+                firstExposure = lastExposure = exposure;
+                return false;
+            }
+            if (exposure == lastExposure) return false;
+            lastExposure = exposure;
+            pendingFrames++;
+            if (!settled || !hasAgreement()) return false;
+
+            acceptedSide = audienceUp;
+            discardPending();
+            return true;
+        }
+
+        boolean waitingForSettledPose(long now) {
+            return hasAgreement() && now - lastExposure <= MAX_SETTLE_EVIDENCE_AGE_NANOS;
+        }
+
+        private boolean hasAgreement() {
+            return pendingFrames >= 3 && lastExposure - firstExposure >= CONFIRM_NANOS;
+        }
+
+        void discardPending() {
+            pendingFrames = 0;
+        }
+
+        void clear() {
+            acceptedSide = null;
+            discardPending();
         }
     }
 

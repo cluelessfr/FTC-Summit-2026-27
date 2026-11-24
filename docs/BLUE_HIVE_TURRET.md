@@ -195,8 +195,13 @@ reported opening and POLLEN yaw with the robot stationary.
 
 On Limelight OS 2026.0, configure a 36h11 AprilTag pipeline in slot 0 or pass
 the slot to the `PollenTurret` constructor. Enable full 3D targeting, set
-the marker size to 82.55 mm, allow blue IDs 38–45, and leave all pipeline 3D
-offsets at zero. `HiveOpeningAim` uses the detected tag's camera-space pose
+the marker size to 82.55 mm, and leave all pipeline 3D offsets at zero. Use
+`30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45` in ID Filters so the
+pipeline can report either HIVE. The POLLEN TeleOps start on blue. Press
+gamepad 1 D-pad right to switch the target HIVE. The `Alliance` telemetry
+shows the selection. POLLEN clears the previous tag lock and remembered
+opening, then uses tags from the selected HIVE as they come into view.
+`HiveOpeningAim` uses the detected tag's camera-space pose
 to place the aim point 2 inches (50.8 mm) behind the center of the upward
 CELL opening, toward the back of the CELL. The offset depends on the tag
 ID and whether that tag is on the upward or downward CELL.

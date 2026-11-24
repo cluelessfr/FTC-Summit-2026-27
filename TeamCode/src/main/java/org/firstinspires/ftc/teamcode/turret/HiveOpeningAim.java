@@ -17,6 +17,8 @@ public final class HiveOpeningAim {
     private static final double OTHER_CELL_OFFSET_Y_METERS = -0.908;
     private static final double OFFSET_INTO_TAG_METERS = 0.146;
     private static final double AIM_DEPTH_METERS = 0.0508; // 2 inches behind the opening rim.
+    private static final double MIN_ENDPOINT_TILT_UP = Math.sin(Math.toRadians(25));
+    private static final double MAX_ENDPOINT_TILT_UP = Math.sin(Math.toRadians(35));
 
     public enum Alliance {
         BLUE(38, 38),
@@ -147,9 +149,10 @@ public final class HiveOpeningAim {
         Vector inward = new Vector(0, 0, 1).rotate(yaw, pitch, roll);
         double inwardUpComponent = mount.directionAtHome(inward).z;
         // A stable CELL's printed-down axis points toward its opening (about +/-30 degrees).
-        // Reject intermediate poses and solutions inconsistent with an underside tag.
+        // Only consider poses near a mechanical endpoint and consistent with an underside tag.
         double printedDownUpComponent = mount.directionAtHome(down).z;
-        if (!(Math.abs(printedDownUpComponent) >= 0.25 && Math.abs(printedDownUpComponent) <= 0.75
+        if (!(Math.abs(printedDownUpComponent) >= MIN_ENDPOINT_TILT_UP
+                && Math.abs(printedDownUpComponent) <= MAX_ENDPOINT_TILT_UP
                 && inwardUpComponent >= 0.60 && inward.dot(tag) > 0)) return null;
 
         boolean taggedCellUp = printedDownUpComponent > 0;

@@ -24,6 +24,7 @@ public class PollenTurretONLY extends LinearOpMode {
             return;
         }
 
+        telemetry.addLine("GP1 D-pad right switches the target HIVE between blue and red.");
         pollenTurret.addInitializationTelemetry(telemetry);
         telemetry.update();
         waitForStart();
@@ -34,6 +35,7 @@ public class PollenTurretONLY extends LinearOpMode {
             pollenTurret.start();
             while (opModeIsActive()) {
                 pinpoint.update();
+                if (gamepad1.dpadRightWasPressed()) pollenTurret.toggleAlliance();
                 pollenTurret.update();
                 pollenTurret.addTelemetry(telemetry);
                 telemetry.update();

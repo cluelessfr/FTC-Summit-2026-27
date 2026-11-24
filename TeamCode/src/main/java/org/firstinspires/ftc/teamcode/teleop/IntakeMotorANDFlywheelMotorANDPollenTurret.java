@@ -5,6 +5,7 @@ import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 
 import org.firstinspires.ftc.teamcode.flywheelTest.FlywheelMotor;
 import org.firstinspires.ftc.teamcode.intakeTest.IntakeMotor;
+import org.firstinspires.ftc.teamcode.intakeTest.IntakeServos;
 import org.firstinspires.ftc.teamcode.turret.PollenTurret;
 import org.firstinspires.ftc.teamcode.localization.InitializePinpoint;
 
@@ -24,11 +25,13 @@ public class IntakeMotorANDFlywheelMotorANDPollenTurret extends LinearOpMode {
         }
 
         IntakeMotor intakeMotor = new IntakeMotor(hardwareMap);
+        IntakeServos intakeServos = new IntakeServos(hardwareMap);
         FlywheelMotor flywheelMotor = new FlywheelMotor(hardwareMap);
         InitializePinpoint pinpoint = USE_PINPOINT ? new InitializePinpoint(hardwareMap) : null;
         PollenTurret pollenTurret = new PollenTurret(hardwareMap, pinpoint);
         telemetry.addLine("Start homes POLLEN and begins AprilTag aiming. Keep the robot stationary.");
         if (USE_PINPOINT) telemetry.addLine("Pinpoint enabled. GP2 A clears the remembered opening.");
+        telemetry.addLine("GP1 D-pad right switches the target HIVE between blue and red.");
         pollenTurret.addInitializationTelemetry(telemetry);
         telemetry.update();
         waitForStart();
@@ -40,7 +43,9 @@ public class IntakeMotorANDFlywheelMotorANDPollenTurret extends LinearOpMode {
                 if (pinpoint != null) pinpoint.update();
                 if (pinpoint != null && gamepad2.a) pollenTurret.clearOdometryTarget();
                 intakeMotor.update(gamepad1);
+                intakeServos.update(gamepad1);
                 flywheelMotor.update(gamepad1);
+                if (gamepad1.dpadRightWasPressed()) pollenTurret.toggleAlliance();
                 pollenTurret.update();
                 intakeMotor.addTelemetry(telemetry);
                 flywheelMotor.addTelemetry(telemetry);

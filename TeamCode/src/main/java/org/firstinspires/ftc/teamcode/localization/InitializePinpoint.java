@@ -14,6 +14,7 @@ public class InitializePinpoint {
     private final GoBildaPinpointDriver pinpoint;
     private final boolean autonomousPoseRestored;
     private long poseFrameId;
+    private static final double FIELD_CENTER_INCHES = 72.0;
     private static final String PINPOINT_NAME = "pinpoint";
     private static final DistanceUnit DISTANCE_UNIT = DistanceUnit.MM;
     private static final GoBildaPinpointDriver.GoBildaOdometryPods ENCODER_RESOLUTION = GoBildaPinpointDriver.GoBildaOdometryPods.goBILDA_SWINGARM_POD;
@@ -36,9 +37,9 @@ public class InitializePinpoint {
             pinpoint.setHeading(LatestPose.getHeading(), AngleUnit.RADIANS);
             LatestPose.clearPose();
         } else {
-            pinpoint.setPosX(0, DistanceUnit.INCH);
-            pinpoint.setPosY(0, DistanceUnit.INCH);
-            pinpoint.setHeading(0, AngleUnit.RADIANS);
+            pinpoint.setPosX(FIELD_CENTER_INCHES, DistanceUnit.INCH);
+            pinpoint.setPosY(FIELD_CENTER_INCHES, DistanceUnit.INCH);
+            pinpoint.setHeading(Math.PI, AngleUnit.RADIANS);
         }
 
         pinpoint.update();
@@ -94,7 +95,7 @@ public class InitializePinpoint {
 
     public void addTelemetry(Telemetry telemetry) {
         telemetry.addData("Pinpoint", "%s; start: %s", pinpoint.getDeviceStatus(),
-                autonomousPoseRestored ? "AUTO" : "ZERO");
+                autonomousPoseRestored ? "AUTO" : "FIELD CENTER");
         telemetry.addData("Position X / Y (in)", "%.1f / %.1f", getXInches(), getYInches());
         telemetry.addData("Field heading (deg)", "%.1f", Math.toDegrees(getHeadingRadians()));
     }
